@@ -1,0 +1,1 @@
+export { askMockAI as askAI } from "./mock";
