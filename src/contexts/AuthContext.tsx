@@ -5,7 +5,9 @@ import { AuthContext, type AuthContextValue } from "./auth-context";
 let initialSession: Promise<AuthPayload> | null = null;
 
 function bootstrapSession() {
-  initialSession ??= refreshSession();
+  initialSession ??= refreshSession().finally(() => {
+    initialSession = null;
+  });
   return initialSession;
 }
 
@@ -15,7 +17,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    const expire = () => setUser(null);
+    const expire = () => {
+      setAccessToken(null);
+      setUser(null);
+    };
     window.addEventListener("auth:expired", expire);
 
     void bootstrapSession()
@@ -34,6 +39,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("auth:expired", expire);
     };
   }, []);
+
+  useEffect(() => {
+    const preference = user?.settings.theme ?? "DARK";
+    const media = typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+    const applyTheme = () => {
+      const dark = preference === "DARK" || (preference === "SYSTEM" && (media?.matches ?? true));
+      const resolved = dark ? "dark" : "light";
+      document.documentElement.dataset.colorTheme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    };
+
+    applyTheme();
+    if (preference === "SYSTEM") media?.addEventListener("change", applyTheme);
+    return () => media?.removeEventListener("change", applyTheme);
+  }, [user?.settings.theme]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

@@ -13,7 +13,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api, apiErrorMessage } from "../services/api";
+import { apiErrorMessage } from "../services/api";
+import { getReports } from "../services/reports";
 import type { ReportData } from "../types/api";
 
 const emptyReports: ReportData = {
@@ -33,10 +34,15 @@ export default function Reports() {
   const [reports, setReports] = useState<ReportData>(emptyReports);
 
   useEffect(() => {
-    void api
-      .get<{ data: ReportData }>("/reports/summary")
-      .then((response) => setReports(response.data.data))
-      .catch((error) => toast.error(apiErrorMessage(error, "Could not load reports.")));
+    const controller = new AbortController();
+    void getReports(controller.signal)
+      .then(setReports)
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          toast.error(apiErrorMessage(error, "Could not load reports."));
+        }
+      });
+    return () => controller.abort();
   }, []);
 
   return (
@@ -52,7 +58,11 @@ export default function Reports() {
       </div>
 
       <div className="mt-10 grid gap-8 lg:grid-cols-2">
-        <div className="rounded-xl bg-slate-900 p-6">
+        <div
+          className="rounded-xl bg-slate-900 p-6"
+          role="img"
+          aria-label={`Monthly leads: ${reports.monthly.map((entry) => `${entry.month} ${entry.leads}`).join(", ") || "no data"}`}
+        >
           <h2 className="mb-6 text-xl font-semibold">Monthly Leads</h2>
           <ResponsiveContainer width="100%" height={320}>
             <BarChart data={reports.monthly}>
@@ -65,7 +75,11 @@ export default function Reports() {
           </ResponsiveContainer>
         </div>
 
-        <div className="rounded-xl bg-slate-900 p-6">
+        <div
+          className="rounded-xl bg-slate-900 p-6"
+          role="img"
+          aria-label={`Lead status counts: ${reports.status.map((entry) => `${entry.name} ${entry.value}`).join(", ") || "no data"}`}
+        >
           <h2 className="mb-6 text-xl font-semibold">Lead Status</h2>
           <ResponsiveContainer width="100%" height={320}>
             <PieChart>

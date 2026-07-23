@@ -30,12 +30,20 @@ export function setAccessToken(token: string | null) {
 
 export function refreshSession(): Promise<AuthPayload> {
   if (!refreshPromise) {
-    refreshPromise = axios
-      .post<ApiEnvelope<AuthPayload>>(`${baseURL}/auth/refresh`, {}, { withCredentials: true })
+    const performRefresh = () => axios
+      .post<ApiEnvelope<AuthPayload>>(`${baseURL}/auth/refresh`, {}, {
+        withCredentials: true,
+        timeout: 15_000,
+      })
       .then((response) => {
         setAccessToken(response.data.data.accessToken);
         return response.data.data;
-      })
+      });
+    const coordinatedRefresh = navigator.locks
+      ? navigator.locks.request("ai-sales-session-refresh", performRefresh)
+      : performRefresh();
+
+    refreshPromise = coordinatedRefresh
       .finally(() => {
         refreshPromise = null;
       });
@@ -56,9 +64,15 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const request = error.config as RetriableRequest | undefined;
-    const isAuthEndpoint = request?.url?.includes("/auth/") ?? false;
+    const isSessionMutation = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"]
+      .some((path) => request?.url?.endsWith(path));
 
-    if (error.response?.status === 401 && request && !request._retriedAfterRefresh && !isAuthEndpoint) {
+    if (
+      error.response?.status === 401 &&
+      request &&
+      !request._retriedAfterRefresh &&
+      !isSessionMutation
+    ) {
       request._retriedAfterRefresh = true;
       try {
         const session = await refreshSession();

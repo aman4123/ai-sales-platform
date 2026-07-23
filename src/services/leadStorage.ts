@@ -1,9 +1,24 @@
 import { api } from "./api";
-import type { Lead, LeadInput } from "../types/lead";
+import type { Lead, LeadInput, LeadStatus } from "../types/lead";
 
-export async function getLeads(): Promise<Lead[]> {
-  const response = await api.get<{ data: { leads: Lead[] } }>("/leads");
-  return response.data.data.leads;
+export interface LeadPage {
+  leads: Lead[];
+  total: number;
+  nextCursor: string | null;
+}
+
+interface LeadQuery {
+  search?: string;
+  status?: LeadStatus;
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+export async function getLeadPage(query: LeadQuery = {}): Promise<LeadPage> {
+  const { signal, ...params } = query;
+  const response = await api.get<{ data: LeadPage }>("/leads", { params, signal });
+  return response.data.data;
 }
 
 export async function createLead(input: LeadInput): Promise<Lead> {

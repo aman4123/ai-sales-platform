@@ -60,16 +60,16 @@ export default function Settings() {
           <h2 className="mb-5 text-2xl font-semibold">👤 Profile</h2>
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <label className="mb-2 block text-slate-400">Full Name</label>
-              <input value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-lg bg-slate-800 p-3 outline-none" />
+              <label className="mb-2 block text-slate-400" htmlFor="settings-name">Full Name</label>
+              <input id="settings-name" value={name} onChange={(event) => setName(event.target.value)} minLength={2} maxLength={100} required className="w-full rounded-lg bg-slate-800 p-3" />
             </div>
             <div>
-              <label className="mb-2 block text-slate-400">Company</label>
-              <input value={company} onChange={(event) => setCompany(event.target.value)} className="w-full rounded-lg bg-slate-800 p-3 outline-none" />
+              <label className="mb-2 block text-slate-400" htmlFor="settings-company">Company</label>
+              <input id="settings-company" value={company} onChange={(event) => setCompany(event.target.value)} maxLength={160} className="w-full rounded-lg bg-slate-800 p-3" />
             </div>
             <div className="md:col-span-2">
-              <label className="mb-2 block text-slate-400">Business Email</label>
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-lg bg-slate-800 p-3 outline-none" />
+              <label className="mb-2 block text-slate-400" htmlFor="settings-email">Business Email</label>
+              <input id="settings-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={254} required className="w-full rounded-lg bg-slate-800 p-3" />
             </div>
           </div>
         </div>
@@ -78,14 +78,14 @@ export default function Settings() {
           <h2 className="mb-5 text-2xl font-semibold">🤖 AI Settings</h2>
           <div className="grid gap-5 md:grid-cols-2">
             <div>
-              <label className="mb-2 block text-slate-400">AI Provider</label>
-              <select value={provider} onChange={(event) => setProvider(event.target.value as AiProvider)} className="w-full rounded-lg bg-slate-800 p-3">
+              <label className="mb-2 block text-slate-400" htmlFor="settings-provider">AI Provider</label>
+              <select id="settings-provider" value={provider} onChange={(event) => setProvider(event.target.value as AiProvider)} className="w-full rounded-lg bg-slate-800 p-3">
                 <option value="MOCK">Mock AI</option><option value="DEEPSEEK">DeepSeek</option>
               </select>
             </div>
             <div>
-              <label className="mb-2 block text-slate-400">Theme</label>
-              <select value={theme} onChange={(event) => setTheme(event.target.value as Theme)} className="w-full rounded-lg bg-slate-800 p-3">
+              <label className="mb-2 block text-slate-400" htmlFor="settings-theme">Theme</label>
+              <select id="settings-theme" value={theme} onChange={(event) => setTheme(event.target.value as Theme)} className="w-full rounded-lg bg-slate-800 p-3">
                 <option value="DARK">Dark</option><option value="LIGHT">Light</option><option value="SYSTEM">System</option>
               </select>
             </div>
@@ -94,16 +94,16 @@ export default function Settings() {
 
         <div className="rounded-xl bg-slate-900 p-6">
           <h2 className="mb-5 text-2xl font-semibold">📧 Email Settings</h2>
-          <label className="mb-2 block text-slate-400">Default Signature</label>
-          <textarea rows={5} value={signature} onChange={(event) => setSignature(event.target.value)} className="w-full rounded-lg bg-slate-800 p-3 outline-none" />
+          <label className="mb-2 block text-slate-400" htmlFor="settings-signature">Default Signature</label>
+          <textarea id="settings-signature" rows={5} value={signature} onChange={(event) => setSignature(event.target.value)} maxLength={5000} className="w-full rounded-lg bg-slate-800 p-3" />
           <div className="mt-6 flex items-center justify-between">
-            <span>Email Notifications</span>
-            <input type="checkbox" checked={notifications} onChange={() => setNotifications((enabled) => !enabled)} className="h-5 w-5" />
+            <label htmlFor="settings-notifications">Email Notifications</label>
+            <input id="settings-notifications" type="checkbox" checked={notifications} onChange={() => setNotifications((enabled) => !enabled)} className="h-5 w-5" />
           </div>
         </div>
 
         <div className="rounded-xl bg-slate-900 p-6">
-          <button onClick={() => void saveSettings()} disabled={saving} className="w-full rounded-lg bg-blue-600 py-4 text-lg font-semibold hover:bg-blue-700 disabled:opacity-50">
+          <button type="button" onClick={() => void saveSettings()} disabled={saving} className="w-full rounded-lg bg-blue-600 py-4 text-lg font-semibold hover:bg-blue-700 disabled:opacity-50">
             {saving ? "Saving..." : "💾 Save Settings"}
           </button>
         </div>

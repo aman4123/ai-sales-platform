@@ -39,26 +39,32 @@ export default function Login({ mode }: LoginProps) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-      <form onSubmit={submit} className="bg-slate-900 p-8 rounded-xl w-96">
+    <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
+      <form onSubmit={submit} className="w-full max-w-96 rounded-xl bg-slate-900 p-8">
         <h2 className="text-3xl font-bold text-white">
           {isRegister ? "Create Account" : "Login"}
         </h2>
 
         {isRegister && (
-          <input
-            className="w-full mt-6 p-3 rounded bg-slate-800 text-white"
-            placeholder="Full Name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            autoComplete="name"
-            minLength={2}
-            maxLength={100}
-            required
-          />
+          <div className="mt-6">
+            <label className="sr-only" htmlFor="auth-name">Full name</label>
+            <input
+              id="auth-name"
+              className="w-full rounded bg-slate-800 p-3 text-white"
+              placeholder="Full Name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoComplete="name"
+              minLength={2}
+              maxLength={100}
+              required
+            />
+          </div>
         )}
 
+        <label className="sr-only" htmlFor="auth-email">Email address</label>
         <input
+          id="auth-email"
           type="email"
           className={`w-full ${isRegister ? "mt-4" : "mt-6"} p-3 rounded bg-slate-800 text-white`}
           placeholder="Email"
@@ -69,7 +75,9 @@ export default function Login({ mode }: LoginProps) {
           required
         />
 
+        <label className="sr-only" htmlFor="auth-password">Password</label>
         <input
+          id="auth-password"
           type="password"
           className="w-full mt-4 p-3 rounded bg-slate-800 text-white"
           placeholder="Password"

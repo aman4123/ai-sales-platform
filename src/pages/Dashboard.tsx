@@ -2,38 +2,39 @@ import Layout from "../components/layout/Layout";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Lead } from "../types/lead";
-import { getLeads } from "../services/leadStorage";
+import { getLeadPage } from "../services/leadStorage";
+import { getReports } from "../services/reports";
+import type { ReportData } from "../types/api";
+
+const emptyReports: ReportData = {
+  summary: { revenue: 0, leads: 0, meetings: 0, closedDeals: 0 },
+  monthly: [],
+  status: [],
+};
 
 export default function Dashboard() {
   const navigate = useNavigate();
 
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const [recentLeads, setRecentLeads] = useState<Lead[]>([]);
+  const [reports, setReports] = useState<ReportData>(emptyReports);
 
   useEffect(() => {
-    void getLeads().then(setLeads).catch(() => setLeads([]));
+    const controller = new AbortController();
+    void Promise.all([getLeadPage({ limit: 5, signal: controller.signal }), getReports(controller.signal)])
+      .then(([leadPage, reportData]) => {
+        setRecentLeads(leadPage.leads);
+        setReports(reportData);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setRecentLeads([]);
+          setReports(emptyReports);
+        }
+      });
+    return () => controller.abort();
   }, []);
 
-  const interested = leads.filter(
-    (l) => l.status === "INTERESTED"
-  ).length;
-
-  const meetings = leads.filter(
-    (l) => l.status === "MEETING"
-  ).length;
-
-  // const closed = leads.filter(
-  //   (l) => l.status === "Closed"
-  // ).length;
-
-  const revenue = leads
-    .filter((l) => l.status === "CLOSED")
-    .reduce((sum, lead) => {
-      const amount = Number(
-        lead.value
-      );
-
-      return sum + (isNaN(amount) ? 0 : amount);
-    }, 0);
+  const interested = reports.status.find((entry) => entry.name === "Interested")?.value ?? 0;
 
   return (
     <Layout>
@@ -66,7 +67,7 @@ export default function Dashboard() {
           </p>
 
           <h2 className="mt-3 text-4xl font-bold">
-            {leads.length}
+            {reports.summary.leads}
           </h2>
         </div>
 
@@ -86,7 +87,7 @@ export default function Dashboard() {
           </p>
 
           <h2 className="mt-3 text-4xl font-bold text-blue-400">
-            {meetings}
+            {reports.summary.meetings}
           </h2>
         </div>
 
@@ -96,7 +97,7 @@ export default function Dashboard() {
           </p>
 
           <h2 className="mt-3 text-4xl font-bold text-purple-400">
-            ₹{revenue.toLocaleString()}
+            ₹{reports.summary.revenue.toLocaleString()}
           </h2>
         </div>
 
@@ -150,17 +151,14 @@ export default function Dashboard() {
             Recent Activity
           </h2>
 
-          {leads.length === 0 ? (
+          {recentLeads.length === 0 ? (
             <p className="text-slate-400">
               No leads added yet.
             </p>
           ) : (
             <div className="space-y-4">
 
-              {leads
-                .slice(-5)
-                .reverse()
-                .map((lead) => (
+              {recentLeads.map((lead) => (
                   <div
                     key={lead.id}
                     className="rounded-lg bg-slate-800 p-4"
@@ -177,7 +175,7 @@ export default function Dashboard() {
                       {lead.status.replaceAll("_", " ")}
                     </span>
                   </div>
-                ))}
+              ))}
 
             </div>
           )}

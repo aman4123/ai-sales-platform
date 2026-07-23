@@ -3,6 +3,7 @@ import toast from "react-hot-toast";
 import Layout from "../components/layout/Layout";
 import { researchWithAI } from "../services/ai";
 import Loader from "../components/ui/Loader";
+import { apiErrorMessage } from "../services/api";
 
 const suggestions = [
   "Find logistics companies in Gujarat",
@@ -26,16 +27,20 @@ export default function Research() {
     try {
       const response = await researchWithAI(prompt);
       setResult(response);
-    } catch {
-      setResult("❌ Something went wrong while contacting the AI.");
+    } catch (error) {
+      setResult(apiErrorMessage(error, "Something went wrong while contacting the AI."));
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
-  function copyResult() {
-    navigator.clipboard.writeText(result);
-    toast.success("Copied!");
+  async function copyResult() {
+    try {
+      await navigator.clipboard.writeText(result);
+      toast.success("Copied!");
+    } catch {
+      toast.error("The result could not be copied. Select the text and copy it manually.");
+    }
   }
 
   function clearAll() {
@@ -62,6 +67,7 @@ export default function Research() {
         <div className="mb-6 flex flex-wrap gap-3">
           {suggestions.map((item) => (
             <button
+              type="button"
               key={item}
               onClick={() => setPrompt(item)}
               className="rounded-full bg-slate-800 px-4 py-2 text-sm transition hover:bg-blue-600"
@@ -71,7 +77,9 @@ export default function Research() {
           ))}
         </div>
 
+        <label className="sr-only" htmlFor="research-prompt">Research request</label>
         <textarea
+          id="research-prompt"
           rows={5}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -82,6 +90,7 @@ export default function Research() {
         <div className="mt-5 flex flex-wrap gap-3">
 
           <button
+            type="button"
             onClick={handleSearch}
             disabled={loading}
             className="rounded-lg bg-blue-600 px-6 py-3 hover:bg-blue-700 disabled:opacity-50"
@@ -90,13 +99,15 @@ export default function Research() {
           </button>
 
           <button
-            onClick={copyResult}
+            type="button"
+            onClick={() => void copyResult()}
             className="rounded-lg bg-green-600 px-6 py-3 hover:bg-green-700"
           >
             📋 Copy
           </button>
 
           <button
+            type="button"
             onClick={clearAll}
             className="rounded-lg bg-red-600 px-6 py-3 hover:bg-red-700"
           >
@@ -115,7 +126,7 @@ export default function Research() {
 
           </div>
 
-         <div className="min-h-[250px] whitespace-pre-wrap text-slate-200 leading-7">
+         <div className="min-h-[250px] whitespace-pre-wrap text-slate-200 leading-7" aria-live="polite" aria-busy={loading}>
   {loading ? <Loader /> : result}
 </div>
 

@@ -5,11 +5,13 @@ import { generateEmailWithAI } from "../services/ai";
 import Loader from "../components/ui/Loader";
 import { apiErrorMessage } from "../services/api";
 
+type EmailTone = "Professional" | "Friendly" | "Sales" | "Formal";
+
 export default function Email() {
   const [company, setCompany] = useState("");
   const [contact, setContact] = useState("");
   const [industry, setIndustry] = useState("");
-  const [tone, setTone] = useState("Professional");
+  const [tone, setTone] = useState<EmailTone>("Professional");
 
   const [email, setEmail] = useState(
     "Your AI generated email will appear here..."
@@ -30,19 +32,23 @@ export default function Email() {
         company,
         contact,
         industry,
-        tone: tone as "Professional" | "Friendly" | "Sales" | "Formal",
+        tone,
       });
       setEmail(response);
     } catch (error) {
       setEmail(apiErrorMessage(error, "Something went wrong while generating the email."));
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   }
 
-  function copyEmail() {
-    navigator.clipboard.writeText(email);
-    toast.success("Email copied!");
+  async function copyEmail() {
+    try {
+      await navigator.clipboard.writeText(email);
+      toast.success("Email copied!");
+    } catch {
+      toast.error("The email could not be copied. Select the text and copy it manually.");
+    }
   }
 
   function clearAll() {
@@ -67,30 +73,38 @@ export default function Email() {
 
         <div className="grid gap-4 md:grid-cols-2">
 
+          <label className="sr-only" htmlFor="email-company">Company name</label>
           <input
+            id="email-company"
             placeholder="Company Name"
             value={company}
             onChange={(e) => setCompany(e.target.value)}
             className="rounded-lg bg-slate-800 p-3 outline-none"
           />
 
+          <label className="sr-only" htmlFor="email-contact">Contact name</label>
           <input
+            id="email-contact"
             placeholder="Contact Name"
             value={contact}
             onChange={(e) => setContact(e.target.value)}
             className="rounded-lg bg-slate-800 p-3 outline-none"
           />
 
+          <label className="sr-only" htmlFor="email-industry">Industry</label>
           <input
+            id="email-industry"
             placeholder="Industry"
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
             className="rounded-lg bg-slate-800 p-3 outline-none"
           />
 
+          <label className="sr-only" htmlFor="email-tone">Email tone</label>
           <select
+            id="email-tone"
             value={tone}
-            onChange={(e) => setTone(e.target.value)}
+            onChange={(e) => setTone(e.target.value as EmailTone)}
             className="rounded-lg bg-slate-800 p-3"
           >
             <option>Professional</option>
@@ -104,6 +118,7 @@ export default function Email() {
         <div className="mt-6 flex flex-wrap gap-3">
 
           <button
+            type="button"
             onClick={generateEmail}
             disabled={loading}
             className="rounded-lg bg-blue-600 px-6 py-3 hover:bg-blue-700 disabled:opacity-50"
@@ -112,13 +127,15 @@ export default function Email() {
           </button>
 
           <button
-            onClick={copyEmail}
+            type="button"
+            onClick={() => void copyEmail()}
             className="rounded-lg bg-green-600 px-6 py-3 hover:bg-green-700"
           >
             Copy
           </button>
 
           <button
+            type="button"
             onClick={clearAll}
             className="rounded-lg bg-red-600 px-6 py-3 hover:bg-red-700"
           >
@@ -133,6 +150,7 @@ export default function Email() {
   </div>
 ) : (
   <textarea
+    aria-label="Generated email"
     value={email}
     readOnly
     className="mt-8 h-96 w-full rounded-xl bg-slate-800 p-6 outline-none whitespace-pre-wrap"
