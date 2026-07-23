@@ -122,6 +122,10 @@ describe("production API", () => {
     expect(response.body.error.code).toBe("UNAUTHORIZED");
   });
 
+  it("issues a unique identifier with every access token", () => {
+    expect(accessToken()).not.toBe(accessToken());
+  });
+
   it("validates registration input", async () => {
     const { database } = createMockDatabase();
     const response = await request(createApp({ database, serveStatic: false }))

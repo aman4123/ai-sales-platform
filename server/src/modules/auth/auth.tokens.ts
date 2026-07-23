@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { env } from "../../config/env.js";
@@ -27,7 +27,12 @@ export function signAccessToken(user: AuthenticatedUser): string {
   return jwt.sign(
     { email: user.email, role: user.role, type: "access" },
     env.JWT_ACCESS_SECRET,
-    { subject: user.id, expiresIn: env.JWT_ACCESS_TTL_SECONDS, algorithm: "HS256" },
+    {
+      subject: user.id,
+      jwtid: randomUUID(),
+      expiresIn: env.JWT_ACCESS_TTL_SECONDS,
+      algorithm: "HS256",
+    },
   );
 }
 
