@@ -41,6 +41,7 @@ export default function Landing() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Ask anything..."
+          maxLength={4000}
           className="w-full rounded-lg bg-slate-800 p-4 outline-none"
         />
 

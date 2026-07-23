@@ -1,9 +1,15 @@
 import { Bell, Menu, Search, UserCircle } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type RefObject } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../contexts/auth-context";
 
-export default function Navbar({ onOpenNavigation }: { onOpenNavigation: () => void }) {
+export default function Navbar({
+  navigationButtonRef,
+  onOpenNavigation,
+}: {
+  navigationButtonRef: RefObject<HTMLButtonElement | null>;
+  onOpenNavigation: () => void;
+}) {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [query, setQuery] = useState("");
@@ -17,6 +23,7 @@ export default function Navbar({ onOpenNavigation }: { onOpenNavigation: () => v
   return (
     <header className="flex h-20 items-center justify-between gap-3 border-b border-slate-800 bg-slate-950 px-4 sm:px-8">
       <button
+        ref={navigationButtonRef}
         type="button"
         onClick={onOpenNavigation}
         className="rounded-lg p-2 hover:bg-slate-800 lg:hidden"

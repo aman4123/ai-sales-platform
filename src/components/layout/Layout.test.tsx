@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,11 +17,25 @@ function Location() {
 
 describe("application layout", () => {
   beforeEach(() => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
     logout.mockReset();
     mockedUseAuth.mockReturnValue({
       user: {
         id: "user-1",
         email: "sales@example.com",
+        emailVerified: true,
         name: "Sales User",
         role: "MEMBER",
         settings: {
@@ -36,6 +50,7 @@ describe("application layout", () => {
       login: vi.fn(),
       register: vi.fn(),
       logout,
+      acceptSession: vi.fn(),
       updateUser: vi.fn(),
     });
   });
@@ -51,9 +66,24 @@ describe("application layout", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+    const navigation = screen.getByLabelText("Primary navigation");
+    expect(navigation).toHaveAttribute("inert");
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
+    expect(navigation).not.toHaveAttribute("inert");
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
     expect(screen.getAllByRole("button", { name: "Close navigation" })).not.toHaveLength(0);
+    expect(document.activeElement).toHaveAccessibleName("Close navigation");
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "Logout" })).toHaveFocus();
+    await user.tab();
+    await user.keyboard("{Escape}");
+    expect(navigation).toHaveAttribute("inert");
+    expect(document.body.style.overflow).toBe("");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Open navigation" })).toHaveFocus();
+    });
+    await user.click(screen.getByRole("button", { name: "Open navigation" }));
 
     const search = screen.getByRole("searchbox", { name: "Search CRM" });
     await user.type(search, "Acme{enter}");

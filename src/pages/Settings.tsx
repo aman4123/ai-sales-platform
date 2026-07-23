@@ -10,7 +10,7 @@ export default function Settings() {
   const current = user!;
   const [name, setName] = useState(current.name);
   const [company, setCompany] = useState(current.settings.company);
-  const [email, setEmail] = useState(current.email);
+  const email = current.email;
   const [signature, setSignature] = useState(current.settings.signature);
   const [provider, setProvider] = useState<AiProvider>(current.settings.aiProvider);
   const [theme, setTheme] = useState<Theme>(current.settings.theme);
@@ -69,7 +69,8 @@ export default function Settings() {
             </div>
             <div className="md:col-span-2">
               <label className="mb-2 block text-slate-400" htmlFor="settings-email">Business Email</label>
-              <input id="settings-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} maxLength={254} required className="w-full rounded-lg bg-slate-800 p-3" />
+              <input id="settings-email" type="email" value={email} readOnly aria-describedby="settings-email-help" className="w-full cursor-not-allowed rounded-lg bg-slate-800 p-3 opacity-75" />
+              <p id="settings-email-help" className="mt-2 text-sm text-slate-500">Email changes require a separately verified account workflow and are disabled here.</p>
             </div>
           </div>
         </div>

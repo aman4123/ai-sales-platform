@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import Sidebar from "./Sidebar";
 import Navbar from "./Navbar";
 
@@ -8,6 +8,11 @@ type Props = {
 
 export default function Layout({ children }: Props) {
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const navigationButtonRef = useRef<HTMLButtonElement>(null);
+  const closeNavigation = useCallback(() => {
+    setNavigationOpen(false);
+    requestAnimationFrame(() => navigationButtonRef.current?.focus());
+  }, []);
 
   return (
     <div className="flex min-h-screen overflow-x-hidden bg-slate-950 text-white">
@@ -17,10 +22,13 @@ export default function Layout({ children }: Props) {
       >
         Skip to main content
       </a>
-      <Sidebar open={navigationOpen} onClose={() => setNavigationOpen(false)} />
+      <Sidebar open={navigationOpen} onClose={closeNavigation} />
 
       <div className="min-w-0 flex-1">
-        <Navbar onOpenNavigation={() => setNavigationOpen(true)} />
+        <Navbar
+          navigationButtonRef={navigationButtonRef}
+          onOpenNavigation={() => setNavigationOpen(true)}
+        />
         <main id="main-content" className="p-4 sm:p-8" tabIndex={-1}>
           {children}
         </main>

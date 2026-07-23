@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   LayoutDashboard,
@@ -28,6 +29,60 @@ interface SidebarProps {
 export default function Sidebar({ open, onClose }: SidebarProps) {
   const location = useLocation();
   const { user, logout } = useAuth();
+  const sidebarRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [desktop, setDesktop] = useState(
+    () => typeof window !== "undefined"
+      && typeof window.matchMedia === "function"
+      && window.matchMedia("(min-width: 64rem)").matches,
+  );
+  const visible = open || desktop;
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(min-width: 64rem)");
+    const update = () => setDesktop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (!open || desktop) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        sidebarRef.current?.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyboard);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyboard);
+    };
+  }, [desktop, onClose, open]);
 
   return (
     <>
@@ -40,6 +95,9 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         />
       )}
       <aside
+        ref={sidebarRef}
+        aria-hidden={visible ? undefined : true}
+        inert={visible ? undefined : true}
         className={`fixed inset-y-0 left-0 z-50 flex h-dvh w-72 flex-col border-r border-slate-800 bg-slate-900 transition-transform lg:sticky lg:top-0 lg:translate-x-0 ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
@@ -51,6 +109,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
             <p className="mt-2 text-sm text-slate-400">Sales Automation Platform</p>
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
             className="rounded p-1 hover:bg-slate-800 lg:hidden"
@@ -94,9 +153,9 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
           <div className="rounded-xl bg-slate-800 p-4">
             <p className="text-sm text-slate-400">AI Provider</p>
-            <h3 className="mt-1 font-semibold">
+            <p className="mt-1 font-semibold">
               {user?.settings.aiProvider === "DEEPSEEK" ? "DeepSeek" : "Mock AI"}
-            </h3>
+            </p>
           </div>
         </div>
       </aside>

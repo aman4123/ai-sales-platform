@@ -1,9 +1,11 @@
 import Layout from "../components/layout/Layout";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import type { Lead } from "../types/lead";
 import { getLeadPage } from "../services/leadStorage";
 import { getReports } from "../services/reports";
+import { apiErrorMessage } from "../services/api";
 import type { ReportData } from "../types/api";
 
 const emptyReports: ReportData = {
@@ -25,10 +27,11 @@ export default function Dashboard() {
         setRecentLeads(leadPage.leads);
         setReports(reportData);
       })
-      .catch(() => {
+      .catch((error) => {
         if (!controller.signal.aborted) {
           setRecentLeads([]);
           setReports(emptyReports);
+          toast.error(apiErrorMessage(error, "Could not load the dashboard."));
         }
       });
     return () => controller.abort();

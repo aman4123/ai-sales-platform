@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import toast from "react-hot-toast";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "../contexts/auth-context";
@@ -51,6 +52,7 @@ vi.mock("recharts", () => ({
 const authUser: AuthUser = {
   id: "user-1",
   email: "sales@example.com",
+  emailVerified: true,
   name: "Sales User",
   role: "MEMBER",
   settings: {
@@ -82,6 +84,7 @@ describe("primary application pages", () => {
       login: vi.fn(),
       register: vi.fn(),
       logout: vi.fn(),
+      acceptSession: vi.fn(),
       updateUser: vi.fn(),
     });
     mockedGetLeadPage.mockResolvedValue({
@@ -118,6 +121,15 @@ describe("primary application pages", () => {
     withRouter(<Dashboard />);
     expect(await screen.findByText("Acme")).toBeInTheDocument();
     expect(screen.getByText("Total Leads").nextElementSibling).toHaveTextContent("1");
+  });
+
+  it("reports dashboard loading failures instead of presenting empty data as successful", async () => {
+    mockedGetLeadPage.mockRejectedValueOnce(new Error("database unavailable"));
+    withRouter(<Dashboard />);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Could not load the dashboard.");
+    });
   });
 
   it("submits the public AI demo as an accessible form", async () => {

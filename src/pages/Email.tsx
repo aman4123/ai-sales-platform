@@ -79,6 +79,7 @@ export default function Email() {
             placeholder="Company Name"
             value={company}
             onChange={(e) => setCompany(e.target.value)}
+            maxLength={160}
             className="rounded-lg bg-slate-800 p-3 outline-none"
           />
 
@@ -88,6 +89,7 @@ export default function Email() {
             placeholder="Contact Name"
             value={contact}
             onChange={(e) => setContact(e.target.value)}
+            maxLength={160}
             className="rounded-lg bg-slate-800 p-3 outline-none"
           />
 
@@ -97,6 +99,7 @@ export default function Email() {
             placeholder="Industry"
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
+            maxLength={160}
             className="rounded-lg bg-slate-800 p-3 outline-none"
           />
 
