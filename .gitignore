@@ -13,6 +13,9 @@ dist-ssr
 server/dist
 server/src/generated
 coverage
+.backups
+playwright-report
+test-results
 *.local
 .env*
 !.env.example

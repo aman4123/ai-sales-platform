@@ -6,8 +6,9 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /api/health/ready
-    preDeployCommand: npm run db:deploy
-    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 30
+    preDeployCommand: node node_modules/prisma/build/index.js migrate deploy
+    autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
         value: production
@@ -23,6 +24,21 @@ services:
         fromDatabase:
           name: ai-sales-postgres
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ai-sales-redis
+          property: connectionString
+      - key: DATABASE_POOL_MAX
+        value: 10
+      - key: DATABASE_POOL_IDLE_TIMEOUT_MS
+        value: 30000
+      - key: DATABASE_POOL_CONNECTION_TIMEOUT_MS
+        value: 5000
+      - key: DATABASE_STATEMENT_TIMEOUT_MS
+        value: 30000
+      - key: REDIS_CONNECT_TIMEOUT_MS
+        value: 5000
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -37,6 +53,30 @@ services:
         value: 604800
       - key: BCRYPT_ROUNDS
         value: 12
+      - key: APP_BASE_URL
+        sync: false
+      - key: EMAIL_DELIVERY_MODE
+        value: smtp
+      - key: EMAIL_FROM
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: EMAIL_VERIFICATION_TTL_MINUTES
+        value: 1440
+      - key: PASSWORD_RESET_TTL_MINUTES
+        value: 60
+      - key: RECOVERY_CODE_COUNT
+        value: 8
+      - key: METRICS_AUTH_TOKEN
+        generateValue: true
       - key: CORS_ORIGINS
         value: ""
       - key: RATE_LIMIT_WINDOW_MS
@@ -57,6 +97,15 @@ services:
         value: 1500
       - key: AI_HISTORY_RETENTION_DAYS
         value: 90
+      - key: MAINTENANCE_INTERVAL_MS
+        value: 21600000
+
+  - type: keyvalue
+    name: ai-sales-redis
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+    persistenceMode: off
 
 databases:
   - name: ai-sales-postgres
@@ -64,3 +113,4 @@ databases:
     databaseName: ai_sales
     user: ai_sales
     postgresMajorVersion: "17"
+    ipAllowList: []

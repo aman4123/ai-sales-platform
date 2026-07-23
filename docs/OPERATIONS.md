@@ -2,34 +2,38 @@
 
 ## Required configuration
 
-- Generate independent, high-entropy values for `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET`. Changing either value signs users out; rotate them only during a planned session reset.
-- Use the managed PostgreSQL connection string for `DATABASE_URL`. Require TLS according to the database provider's connection guidance.
-- Keep `CORS_ORIGINS` empty for the recommended same-origin deployment. Add only exact `http://` or `https://` origins when a separately hosted browser client is intentional.
-- Configure `DEEPSEEK_API_KEY` only when DeepSeek is enabled. The API rejects selecting DeepSeek when no key is present.
-- Set `TRUST_PROXY` to the exact number of trusted proxies in front of Express. Render uses one.
+- Generate independent high-entropy `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` values. Rotation signs every user out and must be treated as a planned session reset.
+- Use managed PostgreSQL and Redis connection strings. Keep both services private, require provider-recommended transport security, and grant application credentials only the permissions they need.
+- Keep `CORS_ORIGINS` empty for same-origin deployment. Add only exact origins. Set `TRUST_PROXY` to the exact trusted proxy count; Render uses one.
+- Set `APP_BASE_URL` to the public HTTPS origin. Production validation rejects insecure application URLs, absent Redis, log-only email, missing SMTP, and weak or absent metrics credentials.
+- Configure `DEEPSEEK_API_KEY` only when DeepSeek is enabled. The settings API rejects selecting an unconfigured provider.
 
-## Deployment and rollback
+## Deployment
 
-1. CI must pass migration validation, coverage-gated tests, builds, dependency audit, and the Docker build.
-2. Run `npm run db:deploy` once in the pre-deploy phase before directing traffic to the new image.
-3. Verify `/api/health/live` and `/api/health/ready`, then run a login, refresh, CRM CRUD, reports, and configured AI-provider smoke test.
-4. Roll back the application image through the hosting provider if application checks fail. Database migrations in this repository are additive/default/index changes and do not require a destructive rollback.
+1. Require the CI quality, browser E2E, container, vulnerability, and CodeQL checks.
+2. Take or confirm a recent recoverable database point before a migration-bearing release.
+3. Run `npm run db:deploy` as the pre-deploy command. Migrations are committed, deterministic, and applied exactly once by Prisma.
+4. Deploy the immutable image, then require `/api/health/live` and `/api/health/ready` before accepting traffic.
+5. Smoke test registration/email verification, login/refresh/logout, CRM CRUD and isolation, reports, account reset, recovery codes, and the configured AI provider.
+6. Verify the metrics scrape, log ingestion, and alert evaluation timestamps after every environment launch.
 
-## Monitoring and incident signals
+## Rollback
 
-- Collect structured stdout logs and alert on repeated `fatal` events, HTTP 5xx rates, readiness failures, authentication replay detections, and AI provider 502/503 responses.
-- Track p95 request latency, PostgreSQL connections and storage, rate-limit responses, container restarts, and AI provider latency.
-- Preserve the `x-request-id` response header in support reports; logs use the same identifier and redact credentials, cookies, tokens, and provider keys.
+- Roll back the application image through the hosting provider when runtime checks fail. Every current migration is backward-compatible with the preceding application version, so an image rollback does not require dropping schema objects.
+- Do not manually edit Prisma migration history and do not run destructive down migrations in an incident. Correct forward when data is intact.
+- For data loss or a destructive migration, restore PostgreSQL to a new isolated instance, validate it, then change `DATABASE_URL`. Follow `DISASTER_RECOVERY.md`.
+- Changing JWT secrets is an emergency containment action that invalidates all access and refresh tokens. Revoke active refresh rows as part of a credential incident.
 
-## Data protection
+## Security operations
 
-- Enable managed PostgreSQL backups and point-in-time recovery appropriate to the service's recovery objectives. Test a restore before launch and at least quarterly.
-- Restrict database network access and credentials to the application and deployment migration job.
-- AI prompts and responses may contain customer data and are stored per user. Define retention and deletion policy before accepting regulated or sensitive data.
-- Never put secrets in repository files, Docker build arguments, browser environment variables, or support logs.
+- Preserve `x-request-id` in support and incident reports. Structured logs carry the same identifier and redact credentials, cookies, reset tokens, recovery codes, provider keys, and SMTP secrets.
+- Treat refresh-token replay warnings and account-recovery events as security signals. Correlate them with request ID, user ID, source IP, and user agent.
+- Review GitHub dependency alerts and CodeQL findings continuously. Patch critical issues immediately and high issues within the risk window defined by the owner.
+- AI prompts and responses can contain customer data. The default retention is 90 days; set a lower value when contractual or regulatory policy requires it.
 
-## Scaling notes
+## Scaling and graceful failure
 
-- CRM reads are cursor-paginated and text search uses PostgreSQL trigram indexes. Reports aggregate in PostgreSQL.
-- The default rate-limit store is process-local and is appropriate for the single-instance Render Blueprint. Configure a shared external store before running multiple application replicas.
-- Readiness depends on PostgreSQL; liveness does not. Use the correct endpoint for traffic routing versus process restart decisions.
+- All three rate-limit scopes use Redis and therefore remain consistent across replicas. Redis failure fails requests and readiness rather than silently bypassing limits.
+- CRM lists are cursor-paginated, search uses trigram GIN indexes, tenant/status/time indexes support common filters, and reports aggregate in PostgreSQL.
+- SIGTERM/SIGINT stop new HTTP work, close the server, and disconnect PostgreSQL and Redis within ten seconds. Unhandled errors trigger the same controlled shutdown.
+- Liveness checks only the process. Readiness checks PostgreSQL and Redis and returns a redacted 503 response when either is unavailable.

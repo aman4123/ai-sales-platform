@@ -17,9 +17,9 @@ export default defineConfig({
       ],
       thresholds: {
         statements: 80,
-        branches: 50,
-        functions: 85,
-        lines: 80,
+        branches: 60,
+        functions: 86,
+        lines: 81,
       },
     },
     env: {
@@ -37,9 +37,11 @@ export default defineConfig({
       JWT_ACCESS_TTL_SECONDS: "900",
       JWT_REFRESH_TTL_SECONDS: "604800",
       BCRYPT_ROUNDS: "4",
+      AUTH_RATE_LIMIT_MAX: "1000",
       CORS_ORIGINS: "http://localhost:5173",
       SERVE_STATIC: "false",
       DEEPSEEK_API_KEY: "test-provider-key",
+      METRICS_AUTH_TOKEN: "test-metrics-token-that-is-longer-than-thirty-two-characters",
     },
   },
 });
