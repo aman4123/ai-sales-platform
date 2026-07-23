@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { askAI } from "../services/ai";
+import { askDemoAI } from "../services/ai";
+import { apiErrorMessage } from "../services/api";
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -15,16 +16,10 @@ export default function Landing() {
     setLoading(true);
 
     try {
-      const answer = await askAI(prompt);
+      const answer = await askDemoAI(prompt);
       setResult(answer || "No response");
-    } catch (error: any) {
-      console.error("AI Error:", error);
-
-      setResult(
-        error?.message ||
-          JSON.stringify(error) ||
-          "Something went wrong."
-      );
+    } catch (error: unknown) {
+      setResult(apiErrorMessage(error, "Something went wrong."));
     } finally {
       setLoading(false);
     }

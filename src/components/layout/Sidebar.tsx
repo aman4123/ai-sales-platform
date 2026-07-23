@@ -6,7 +6,9 @@ import {
   Mail,
   BarChart3,
   Settings,
+  LogOut,
 } from "lucide-react";
+import { useAuth } from "../../contexts/auth-context";
 
 const menu = [
   {
@@ -43,6 +45,7 @@ const menu = [
 
 export default function Sidebar() {
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   return (
     <aside className="flex h-screen w-72 flex-col border-r border-slate-800 bg-slate-900">
@@ -87,6 +90,14 @@ export default function Sidebar() {
 
       <div className="border-t border-slate-800 p-6">
 
+        <button
+          onClick={() => void logout()}
+          className="mb-4 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-slate-300 transition hover:bg-slate-800"
+        >
+          <LogOut size={19} />
+          Logout
+        </button>
+
         <div className="rounded-xl bg-slate-800 p-4">
 
           <p className="text-sm text-slate-400">
@@ -94,7 +105,7 @@ export default function Sidebar() {
           </p>
 
           <h3 className="mt-1 font-semibold">
-            Mock AI
+            {user?.settings.aiProvider === "DEEPSEEK" ? "DeepSeek" : "Mock AI"}
           </h3>
 
         </div>

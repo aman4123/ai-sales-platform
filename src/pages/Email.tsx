@@ -1,8 +1,9 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
 import Layout from "../components/layout/Layout";
-import { askAI } from "../services/ai";
+import { generateEmailWithAI } from "../services/ai";
 import Loader from "../components/ui/Loader";
+import { apiErrorMessage } from "../services/api";
 
 export default function Email() {
   const [company, setCompany] = useState("");
@@ -17,29 +18,23 @@ export default function Email() {
   const [loading, setLoading] = useState(false);
 
   async function generateEmail() {
+    if (!company.trim() || !contact.trim() || !industry.trim()) {
+      toast.error("Company, contact, and industry are required.");
+      return;
+    }
+
     setLoading(true);
 
-    const prompt = `
-Generate a ${tone} sales email.
-
-Company: ${company}
-Contact: ${contact}
-Industry: ${industry}
-
-Write a compelling cold email with:
-- Subject
-- Greeting
-- Short introduction
-- Value proposition
-- Call to action
-- Professional closing
-`;
-
     try {
-      const response = await askAI(prompt);
+      const response = await generateEmailWithAI({
+        company,
+        contact,
+        industry,
+        tone: tone as "Professional" | "Friendly" | "Sales" | "Formal",
+      });
       setEmail(response);
-    } catch {
-      setEmail("Something went wrong while generating the email.");
+    } catch (error) {
+      setEmail(apiErrorMessage(error, "Something went wrong while generating the email."));
     }
 
     setLoading(false);

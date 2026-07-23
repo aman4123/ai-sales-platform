@@ -10,15 +10,15 @@ export default function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
 
   useEffect(() => {
-    setLeads(getLeads());
+    void getLeads().then(setLeads).catch(() => setLeads([]));
   }, []);
 
   const interested = leads.filter(
-    (l) => l.status === "Interested"
+    (l) => l.status === "INTERESTED"
   ).length;
 
   const meetings = leads.filter(
-    (l) => l.status === "Meeting"
+    (l) => l.status === "MEETING"
   ).length;
 
   // const closed = leads.filter(
@@ -26,10 +26,10 @@ export default function Dashboard() {
   // ).length;
 
   const revenue = leads
-    .filter((l) => l.status === "Closed")
+    .filter((l) => l.status === "CLOSED")
     .reduce((sum, lead) => {
       const amount = Number(
-        lead.value.replace(/[^\d]/g, "")
+        lead.value
       );
 
       return sum + (isNaN(amount) ? 0 : amount);
@@ -174,7 +174,7 @@ export default function Dashboard() {
                     </p>
 
                     <span className="mt-2 inline-block rounded-full bg-blue-600/20 px-3 py-1 text-sm text-blue-400">
-                      {lead.status}
+                      {lead.status.replaceAll("_", " ")}
                     </span>
                   </div>
                 ))}
