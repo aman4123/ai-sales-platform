@@ -1,7 +1,7 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
 import Layout from "../components/layout/Layout";
-import { askAI } from "../services/ai";
+import { researchWithAI } from "../services/ai";
 import Loader from "../components/ui/Loader";
 
 const suggestions = [
@@ -24,7 +24,7 @@ export default function Research() {
     setLoading(true);
 
     try {
-      const response = await askAI(prompt);
+      const response = await researchWithAI(prompt);
       setResult(response);
     } catch {
       setResult("❌ Something went wrong while contacting the AI.");

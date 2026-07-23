@@ -1,15 +1,10 @@
 import { Bell, Search, UserCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useAuth } from "../../contexts/auth-context";
 
 export default function Navbar() {
   const navigate = useNavigate();
-
-  const [name, setName] = useState("Aman Chourasia");
-
-  useEffect(() => {
-    setName(localStorage.getItem("userName") || "Aman Chourasia");
-  }, []);
+  const { user } = useAuth();
 
   return (
     <header className="flex h-20 items-center justify-between border-b border-slate-800 bg-slate-950 px-8">
@@ -48,11 +43,11 @@ export default function Navbar() {
           <div className="text-left">
 
             <p className="font-semibold">
-              {name}
+              {user?.name ?? "Account"}
             </p>
 
             <p className="text-sm text-slate-400">
-              Admin
+              {user?.role === "ADMIN" ? "Admin" : "Member"}
             </p>
 
           </div>

@@ -6,9 +6,9 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'server/dist', 'server/src/generated', 'coverage']),
   {
-    files: ['**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'vite.config.ts'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -16,7 +16,20 @@ export default defineConfig([
       reactRefresh.configs.vite,
     ],
     languageOptions: {
-      globals: globals.browser,
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
+    },
+  },
+  {
+    files: ['server/**/*.ts', 'prisma.config.ts'],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+    ],
+    languageOptions: {
+      globals: globals.node,
     },
   },
 ])

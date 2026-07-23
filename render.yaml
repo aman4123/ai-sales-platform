@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: ai-sales-platform
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health/ready
+    preDeployCommand: npm run db:deploy
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: SERVE_STATIC
+        value: "true"
+      - key: TRUST_PROXY
+        value: 1
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-sales-postgres
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_TTL_SECONDS
+        value: 900
+      - key: JWT_REFRESH_TTL_SECONDS
+        value: 604800
+      - key: BCRYPT_ROUNDS
+        value: 12
+
+databases:
+  - name: ai-sales-postgres
+    plan: basic-256mb
+    databaseName: ai_sales
+    user: ai_sales
+    postgresMajorVersion: "17"
