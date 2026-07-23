@@ -17,6 +17,7 @@ const session: AuthPayload = {
   user: {
     id: "user-1",
     email: "sales@example.com",
+    emailVerified: true,
     name: "Sales User",
     role: "MEMBER",
     settings: {

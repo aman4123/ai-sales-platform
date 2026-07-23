@@ -11,6 +11,7 @@ const baseContext = {
   login: vi.fn(),
   register: vi.fn(),
   logout: vi.fn(),
+  acceptSession: vi.fn(),
   updateUser: vi.fn(),
 };
 
@@ -49,6 +50,7 @@ describe("protected routing", () => {
       user: {
         id: "user-1",
         email: "sales@example.com",
+        emailVerified: true,
         name: "Sales User",
         role: "MEMBER",
         settings: {

@@ -3,10 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const productionEnvironment = {
   NODE_ENV: "production",
   DATABASE_URL: "postgresql://app:secure-database-password@database:5432/app",
+  REDIS_URL: "rediss://cache.example.com:6379",
   JWT_ACCESS_SECRET: "independent-access-secret-1234567890",
   JWT_REFRESH_SECRET: "independent-refresh-secret-0987654321",
   CORS_ORIGINS: "",
   DEEPSEEK_API_URL: "https://api.deepseek.com",
+  APP_BASE_URL: "https://sales.example.com",
+  EMAIL_DELIVERY_MODE: "smtp",
+  EMAIL_FROM: "no-reply@sales.example.com",
+  SMTP_HOST: "smtp.example.com",
+  METRICS_AUTH_TOKEN: "independent-metrics-token-1234567890",
 };
 
 function applyEnvironment(overrides: Record<string, string> = {}) {

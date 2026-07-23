@@ -64,7 +64,17 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
     const request = error.config as RetriableRequest | undefined;
-    const isSessionMutation = ["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"]
+    const isSessionMutation = [
+      "/auth/login",
+      "/auth/register",
+      "/auth/refresh",
+      "/auth/logout",
+      "/auth/verify-email",
+      "/auth/verification/request",
+      "/auth/password-reset/request",
+      "/auth/password-reset/confirm",
+      "/auth/recover",
+    ]
       .some((path) => request?.url?.endsWith(path));
 
     if (

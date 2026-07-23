@@ -33,6 +33,7 @@ describe("authentication form", () => {
       login,
       register,
       logout: vi.fn(),
+      acceptSession: vi.fn(),
       updateUser: vi.fn(),
     });
   });
@@ -50,8 +51,15 @@ describe("authentication form", () => {
   });
 
   it("labels and submits registration fields", async () => {
+    register.mockResolvedValue({
+      email: "admin@example.com",
+      verificationRequired: true,
+      developmentVerificationToken: "verification-token",
+    });
     const user = userEvent.setup();
     renderPage("register");
+
+    expect(screen.getByLabelText("Password")).toHaveAttribute("minlength", "12");
 
     await user.type(screen.getByLabelText("Full name"), "Sales Admin");
     await user.type(screen.getByLabelText("Email address"), "admin@example.com");
@@ -59,5 +67,10 @@ describe("authentication form", () => {
     await user.click(screen.getByRole("button", { name: "Register" }));
 
     expect(register).toHaveBeenCalledWith("Sales Admin", "admin@example.com", "safe-password");
+    expect(await screen.findByRole("heading", { name: "Check your email" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open development verification link" })).toHaveAttribute(
+      "href",
+      "/verify-email?token=verification-token",
+    );
   });
 });

@@ -42,7 +42,11 @@ export function createSettingsRouter(database: DatabaseClient) {
     });
     const settings =
       user.settings ??
-      (await database.userSettings.create({ data: { userId: request.user!.id } }));
+      (await database.userSettings.upsert({
+        where: { userId: request.user!.id },
+        create: { userId: request.user!.id },
+        update: {},
+      }));
 
     response.json({ data: { settings: serializeSettings(user, settings) } });
   });
@@ -56,47 +60,43 @@ export function createSettingsRouter(database: DatabaseClient) {
         "DeepSeek cannot be selected until its API key is configured.",
       );
     }
-    const emailOwner = await database.user.findUnique({ where: { email: input.email } });
-
-    if (emailOwner && emailOwner.id !== request.user!.id) {
-      throw new AppError(409, "EMAIL_IN_USE", "Another account already uses this email address.");
+    const currentUser = await database.user.findUniqueOrThrow({ where: { id: request.user!.id } });
+    if (input.email !== currentUser.email) {
+      throw new AppError(
+        409,
+        "EMAIL_CHANGE_REQUIRES_VERIFICATION",
+        "Email changes require a separately verified account workflow.",
+      );
     }
 
-    try {
-      const result = await database.$transaction(async (transaction) => {
-        const user = await transaction.user.update({
-          where: { id: request.user!.id },
-          data: { name: input.name, email: input.email },
-        });
-        const settings = await transaction.userSettings.upsert({
-          where: { userId: request.user!.id },
-          create: {
-            userId: request.user!.id,
-            company: input.company,
-            signature: input.signature,
-            aiProvider: input.aiProvider,
-            theme: input.theme,
-            notifications: input.notifications,
-          },
-          update: {
-            company: input.company,
-            signature: input.signature,
-            aiProvider: input.aiProvider,
-            theme: input.theme,
-            notifications: input.notifications,
-          },
-        });
-
-        return serializeSettings(user, settings);
+    const result = await database.$transaction(async (transaction) => {
+      const user = await transaction.user.update({
+        where: { id: request.user!.id },
+        data: { name: input.name },
+      });
+      const settings = await transaction.userSettings.upsert({
+        where: { userId: request.user!.id },
+        create: {
+          userId: request.user!.id,
+          company: input.company,
+          signature: input.signature,
+          aiProvider: input.aiProvider,
+          theme: input.theme,
+          notifications: input.notifications,
+        },
+        update: {
+          company: input.company,
+          signature: input.signature,
+          aiProvider: input.aiProvider,
+          theme: input.theme,
+          notifications: input.notifications,
+        },
       });
 
-      response.json({ data: { settings: result } });
-    } catch (error) {
-      if ((error as { code?: string }).code === "P2002") {
-        throw new AppError(409, "EMAIL_IN_USE", "Another account already uses this email address.");
-      }
-      throw error;
-    }
+      return serializeSettings(user, settings);
+    });
+
+    response.json({ data: { settings: result } });
   });
 
   return router;
