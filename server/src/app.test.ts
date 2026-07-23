@@ -3,6 +3,7 @@ import { hash } from "bcryptjs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import type { DatabaseClient } from "./lib/prisma.js";
+import { safeRequestPath } from "./lib/logger.js";
 import {
   hashToken,
   signAccessToken,
@@ -12,6 +13,7 @@ import {
 const user = {
   id: "user-1",
   email: "sales@example.com",
+  emailVerifiedAt: new Date(),
   name: "Sales Admin",
   role: "ADMIN" as const,
   passwordHash: "$2b$04$Of1eA8z3f7J.KF72H8AQXOFx8SEAfH9/wyrDJlWjoIrfiKAdU3MuK",
@@ -37,6 +39,17 @@ function createMockDatabase() {
     refreshSession: {
       create: vi.fn(),
       findUnique: vi.fn(),
+      updateMany: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    accountToken: {
+      create: vi.fn(),
+      findUnique: vi.fn(),
+      updateMany: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    recoveryCode: {
+      createMany: vi.fn(),
       updateMany: vi.fn(),
       deleteMany: vi.fn(),
     },
@@ -103,13 +116,43 @@ describe("production API", () => {
     expect(mock.$queryRaw).toHaveBeenCalledOnce();
   });
 
+  it("returns a safe readiness failure when a dependency is unavailable", async () => {
+    const { database, mock } = createMockDatabase();
+    mock.$queryRaw.mockRejectedValue(new Error("database unavailable"));
+
+    const response = await request(createApp({ database, serveStatic: false })).get(
+      "/api/health/ready",
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.body.error.code).toBe("NOT_READY");
+    expect(response.body.error.requestId).toBeTypeOf("string");
+  });
+
+  it("protects Prometheus metrics with a bearer secret", async () => {
+    const { database } = createMockDatabase();
+    const app = createApp({ database, serveStatic: false });
+
+    const denied = await request(app).get("/api/metrics");
+    expect(denied.status).toBe(401);
+
+    const response = await request(app)
+      .get("/api/metrics")
+      .set("authorization", "Bearer test-metrics-token-that-is-longer-than-thirty-two-characters");
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/plain");
+    expect(response.text).toContain("ai_sales_http_requests_total");
+  });
+
   it("returns a consistent API not-found error", async () => {
     const { database } = createMockDatabase();
-    const response = await request(createApp({ database, serveStatic: false })).get("/api/missing");
+    const response = await request(createApp({ database, serveStatic: false }))
+      .get("/api/missing?token=must-not-be-reflected");
 
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe("NOT_FOUND");
     expect(response.body.error.requestId).toBeTypeOf("string");
+    expect(response.body.error.message).not.toContain("must-not-be-reflected");
   });
 
   it("classifies malformed JSON as a client error", async () => {
@@ -156,6 +199,11 @@ describe("production API", () => {
     expect(accessToken()).not.toBe(accessToken());
   });
 
+  it("removes sensitive query strings from structured request logs", () => {
+    expect(safeRequestPath("/reset-password?token=secret-value")).toBe("/reset-password");
+    expect(safeRequestPath(undefined)).toBe("/");
+  });
+
   it("validates registration input", async () => {
     const { database } = createMockDatabase();
     const response = await request(createApp({ database, serveStatic: false }))
@@ -166,23 +214,78 @@ describe("production API", () => {
     expect(response.body.error.code).toBe("VALIDATION_ERROR");
   });
 
-  it("registers a user and sets an HTTP-only refresh cookie", async () => {
+  it("registers an unverified user without granting a session", async () => {
     const { database, mock } = createMockDatabase();
     mock.user.findUnique.mockResolvedValue(null);
-    mock.user.create.mockResolvedValue(user);
-    mock.refreshSession.create.mockResolvedValue({});
+    mock.user.create.mockResolvedValue({ ...user, emailVerifiedAt: null });
+    mock.accountToken.create.mockResolvedValue({ id: "verification-1" });
+    const emailService = { sendVerification: vi.fn(), sendPasswordReset: vi.fn() };
 
-    const response = await request(createApp({ database, serveStatic: false }))
+    const response = await request(createApp({ database, emailService, serveStatic: false }))
       .post("/api/auth/register")
       .send({ name: user.name, email: user.email, password: "safe-password-123" });
 
     expect(response.status).toBe(201);
-    expect(response.body.data.user.email).toBe(user.email);
-    expect(response.body.data.user.passwordHash).toBeUndefined();
-    expect(response.body.data.accessToken).toBeTypeOf("string");
+    expect(response.body.data.email).toBe(user.email);
+    expect(response.body.data.verificationRequired).toBe(true);
+    expect(response.body.data.accessToken).toBeUndefined();
+    expect(response.headers["set-cookie"]).toBeUndefined();
+    expect(emailService.sendVerification).toHaveBeenCalledOnce();
+    expect(mock.refreshSession.create).not.toHaveBeenCalled();
+  });
+
+  it("does not reveal whether a registration email already belongs to an account", async () => {
+    const { database, mock } = createMockDatabase();
+    mock.user.findUnique.mockResolvedValue(user);
+    const emailService = { sendVerification: vi.fn(), sendPasswordReset: vi.fn() };
+
+    const response = await request(createApp({ database, emailService, serveStatic: false }))
+      .post("/api/auth/register")
+      .send({ name: "Different Name", email: user.email, password: "safe-password-123" });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data).toEqual({ email: user.email, verificationRequired: true });
+    expect(mock.user.create).not.toHaveBeenCalled();
+    expect(emailService.sendVerification).not.toHaveBeenCalled();
+  });
+
+  it("returns the same password-reset response for an unknown account", async () => {
+    const { database, mock } = createMockDatabase();
+    mock.user.findUnique.mockResolvedValue(null);
+    const emailService = { sendVerification: vi.fn(), sendPasswordReset: vi.fn() };
+
+    const response = await request(createApp({ database, emailService, serveStatic: false }))
+      .post("/api/auth/password-reset/request")
+      .send({ email: "missing@example.com" });
+
+    expect(response.status).toBe(202);
+    expect(response.body.data.message).toContain("eligible account");
+    expect(emailService.sendPasswordReset).not.toHaveBeenCalled();
+  });
+
+  it("verifies email, creates one-time recovery codes, and starts a session", async () => {
+    const { database, mock } = createMockDatabase();
+    mock.accountToken.findUnique.mockResolvedValue({
+      id: "verification-1",
+      userId: user.id,
+      type: "EMAIL_VERIFICATION",
+      usedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      user: { ...user, emailVerifiedAt: null },
+    });
+    mock.accountToken.updateMany.mockResolvedValue({ count: 1 });
+    mock.user.update.mockResolvedValue(user);
+    mock.refreshSession.create.mockResolvedValue({});
+
+    const response = await request(createApp({ database, serveStatic: false }))
+      .post("/api/auth/verify-email")
+      .send({ token: "a".repeat(43) });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.user.emailVerified).toBe(true);
+    expect(response.body.data.recoveryCodes).toHaveLength(8);
     expect(response.headers["set-cookie"]?.[0]).toContain("HttpOnly");
-    expect(response.headers["set-cookie"]?.[0]).toContain("SameSite=Strict");
-    expect(mock.refreshSession.create).toHaveBeenCalledOnce();
+    expect(mock.recoveryCode.createMany).toHaveBeenCalledOnce();
   });
 
   it("rejects invalid credentials without exposing account existence", async () => {
@@ -213,6 +316,71 @@ describe("production API", () => {
     expect(response.body.data.user.email).toBe(user.email);
     expect(response.headers["set-cookie"]?.[0]).toContain("HttpOnly");
     expect(mock.refreshSession.create).toHaveBeenCalledOnce();
+  });
+
+  it("does not grant a session before email verification", async () => {
+    const { database, mock } = createMockDatabase();
+    mock.user.findUnique.mockResolvedValue({
+      ...user,
+      emailVerifiedAt: null,
+      passwordHash: await hash("safe-password-123", 4),
+    });
+
+    const response = await request(createApp({ database, serveStatic: false }))
+      .post("/api/auth/login")
+      .send({ email: user.email, password: "safe-password-123" });
+
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe("EMAIL_NOT_VERIFIED");
+    expect(mock.refreshSession.create).not.toHaveBeenCalled();
+  });
+
+  it("consumes a password reset token and revokes active sessions", async () => {
+    const { database, mock } = createMockDatabase();
+    mock.accountToken.findUnique.mockResolvedValue({
+      id: "reset-1",
+      userId: user.id,
+      type: "PASSWORD_RESET",
+      usedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mock.accountToken.updateMany.mockResolvedValue({ count: 1 });
+    mock.refreshSession.updateMany.mockResolvedValue({ count: 2 });
+
+    const response = await request(createApp({ database, serveStatic: false }))
+      .post("/api/auth/password-reset/confirm")
+      .send({ token: "b".repeat(43), password: "a-new-safe-password" });
+
+    expect(response.status).toBe(204);
+    expect(mock.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ passwordChangedAt: expect.any(Date) }) }),
+    );
+    expect(mock.refreshSession.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: user.id, revokedAt: null } }),
+    );
+  });
+
+  it("recovers an account with a single-use recovery code", async () => {
+    const { database, mock } = createMockDatabase();
+    const recoveryCode = "ABCDE-12345-ABCDE-12345";
+    mock.user.findUnique.mockResolvedValue({
+      ...user,
+      recoveryCodes: [{ id: "recovery-1", codeHash: hashToken("ABCDE12345ABCDE12345") }],
+    });
+    mock.recoveryCode.updateMany.mockResolvedValue({ count: 1 });
+    mock.refreshSession.updateMany.mockResolvedValue({ count: 1 });
+
+    const response = await request(createApp({ database, serveStatic: false }))
+      .post("/api/auth/recover")
+      .send({ email: user.email, recoveryCode, password: "another-safe-password" });
+
+    expect(response.status).toBe(204);
+    expect(mock.recoveryCode.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ usedAt: null }) }),
+    );
+    expect(mock.accountToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: user.id, type: "PASSWORD_RESET" },
+    });
   });
 
   it("rotates a valid refresh session", async () => {

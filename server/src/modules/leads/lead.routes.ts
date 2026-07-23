@@ -58,6 +58,8 @@ export function createLeadRouter(database: DatabaseClient) {
             OR: [
               { company: { contains: query.search, mode: "insensitive" as const } },
               { contact: { contains: query.search, mode: "insensitive" as const } },
+              { email: { contains: query.search, mode: "insensitive" as const } },
+              { industry: { contains: query.search, mode: "insensitive" as const } },
             ],
           }
         : {}),

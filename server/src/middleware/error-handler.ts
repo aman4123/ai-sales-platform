@@ -12,7 +12,7 @@ export const notFoundHandler: RequestHandler = (request, response) => {
   response.status(404).json({
     error: {
       code: "NOT_FOUND",
-      message: `No route matches ${request.method} ${request.originalUrl}.`,
+      message: `No route matches ${request.method} ${request.path}.`,
       requestId: request.id,
     },
   });
