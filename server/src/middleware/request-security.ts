@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { RequestHandler } from "express";
-import { rateLimit } from "express-rate-limit";
+import { ipKeyGenerator, rateLimit } from "express-rate-limit";
 import { env } from "../config/env.js";
 
 export const requestId: RequestHandler = (request, response, next) => {
@@ -13,11 +13,12 @@ export const requestId: RequestHandler = (request, response, next) => {
 };
 
 function rateLimitHandler(message: string): RequestHandler {
-  return (_request, response) => {
+  return (request, response) => {
     response.status(429).json({
       error: {
         code: "RATE_LIMITED",
         message,
+        requestId: request.id,
       },
     });
   };
@@ -45,5 +46,7 @@ export const aiRateLimit = rateLimit({
   limit: env.AI_RATE_LIMIT_MAX,
   standardHeaders: "draft-8",
   legacyHeaders: false,
+  keyGenerator: (request) =>
+    request.user?.id ?? ipKeyGenerator(request.ip ?? request.socket.remoteAddress ?? "unknown"),
   handler: rateLimitHandler("AI request limit reached. Please try again later."),
 });

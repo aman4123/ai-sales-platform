@@ -14,7 +14,6 @@ import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import {
   aiRateLimit,
   apiRateLimit,
-  authRateLimit,
   requestId,
 } from "./middleware/request-security.js";
 import { createAiRouter, createDemoAiRouter } from "./modules/ai/ai.routes.js";
@@ -61,7 +60,7 @@ export function createApp({ database, serveStatic }: AppOptions) {
 
   app.use("/api", apiRateLimit);
   app.use("/api/health", createHealthRouter(database));
-  app.use("/api/auth", authRateLimit, createAuthRouter(database));
+  app.use("/api/auth", createAuthRouter(database));
   app.use("/api/ai/demo", aiRateLimit, createDemoAiRouter());
   app.use("/api/leads", requireAuth, createLeadRouter(database));
   app.use("/api/settings", requireAuth, createSettingsRouter(database));

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { env } from "../../config/env.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import { askDeepSeek, mockEmail, mockResearch } from "./ai.service.js";
 
@@ -19,6 +20,25 @@ async function providerFor(database: DatabaseClient, userId: string) {
   return settings ?? { aiProvider: "MOCK" as const, signature: "" };
 }
 
+async function persistActivity(
+  database: DatabaseClient,
+  activity: {
+    userId: string;
+    type: "RESEARCH" | "EMAIL";
+    provider: "MOCK" | "DEEPSEEK";
+    prompt: string;
+    response: string;
+  },
+) {
+  const retentionStart = new Date(Date.now() - env.AI_HISTORY_RETENTION_DAYS * 86_400_000);
+  await database.$transaction(async (transaction) => {
+    await transaction.aiRequest.deleteMany({
+      where: { userId: activity.userId, createdAt: { lt: retentionStart } },
+    });
+    await transaction.aiRequest.create({ data: activity });
+  });
+}
+
 export function createAiRouter(database: DatabaseClient) {
   const router = Router();
 
@@ -33,14 +53,12 @@ export function createAiRouter(database: DatabaseClient) {
           )
         : mockResearch(input.prompt);
 
-    await database.aiRequest.create({
-      data: {
-        userId: request.user!.id,
-        type: "RESEARCH",
-        provider: settings.aiProvider,
-        prompt: input.prompt,
-        response: result,
-      },
+    await persistActivity(database, {
+      userId: request.user!.id,
+      type: "RESEARCH",
+      provider: settings.aiProvider,
+      prompt: input.prompt,
+      response: result,
     });
 
     response.json({ data: { result, provider: settings.aiProvider } });
@@ -58,14 +76,12 @@ export function createAiRouter(database: DatabaseClient) {
           )
         : mockEmail({ ...input, signature: settings.signature });
 
-    await database.aiRequest.create({
-      data: {
-        userId: request.user!.id,
-        type: "EMAIL",
-        provider: settings.aiProvider,
-        prompt,
-        response: result,
-      },
+    await persistActivity(database, {
+      userId: request.user!.id,
+      type: "EMAIL",
+      provider: settings.aiProvider,
+      prompt,
+      response: result,
     });
 
     response.json({ data: { result, provider: settings.aiProvider } });

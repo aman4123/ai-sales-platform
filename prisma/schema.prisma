@@ -44,7 +44,7 @@ model User {
   email        String           @unique
   passwordHash String
   name         String
-  role         UserRole         @default(ADMIN)
+  role         UserRole         @default(MEMBER)
   leads        Lead[]
   settings     UserSettings?
   sessions     RefreshSession[]
@@ -83,8 +83,10 @@ model Lead {
   updatedAt DateTime   @updatedAt
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, createdAt])
+  @@index([userId, createdAt, id])
   @@index([userId, status])
+  @@index([company(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_company_trgm_idx")
+  @@index([contact(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_contact_trgm_idx")
 }
 
 model UserSettings {

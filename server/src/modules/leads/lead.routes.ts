@@ -32,6 +32,8 @@ const idSchema = z.string().min(1).max(64);
 const listQuerySchema = z.object({
   search: z.string().trim().max(160).optional(),
   status: z.enum(leadStatuses).optional(),
+  cursor: idSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 function cleanOptional(value: string | undefined): string | null | undefined {
@@ -48,23 +50,37 @@ export function createLeadRouter(database: DatabaseClient) {
 
   router.get("/", async (request, response) => {
     const query = listQuerySchema.parse(request.query);
-    const leads = await database.lead.findMany({
-      where: {
-        userId: request.user!.id,
-        ...(query.status ? { status: query.status } : {}),
-        ...(query.search
-          ? {
-              OR: [
-                { company: { contains: query.search, mode: "insensitive" } },
-                { contact: { contains: query.search, mode: "insensitive" } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const where = {
+      userId: request.user!.id,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { company: { contains: query.search, mode: "insensitive" as const } },
+              { contact: { contains: query.search, mode: "insensitive" as const } },
+            ],
+          }
+        : {}),
+    };
+    const [matches, total] = await Promise.all([
+      database.lead.findMany({
+        where,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: query.limit + 1,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+      }),
+      database.lead.count({ where }),
+    ]);
+    const hasMore = matches.length > query.limit;
+    const leads = hasMore ? matches.slice(0, query.limit) : matches;
 
-    response.json({ data: { leads: leads.map(serializeLead) } });
+    response.json({
+      data: {
+        leads: leads.map(serializeLead),
+        total,
+        nextCursor: hasMore ? leads.at(-1)!.id : null,
+      },
+    });
   });
 
   router.post("/", async (request, response) => {
@@ -93,31 +109,30 @@ export function createLeadRouter(database: DatabaseClient) {
   router.put("/:id", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const input = updateLeadSchema.parse(request.body);
-    const existing = await database.lead.findFirst({
-      where: { id, userId: request.user!.id },
-      select: { id: true },
-    });
-
-    if (!existing) throw new NotFoundError("Lead");
-
     const email = cleanOptional(input.email);
     const phone = cleanOptional(input.phone);
     const industry = cleanOptional(input.industry);
     const notes = cleanOptional(input.notes);
 
-    const lead = await database.lead.update({
-      where: { id },
-      data: {
-        ...(input.company !== undefined ? { company: input.company } : {}),
-        ...(input.contact !== undefined ? { contact: input.contact } : {}),
-        ...(input.status !== undefined ? { status: input.status } : {}),
-        ...(input.value !== undefined ? { value: input.value } : {}),
-        ...(email !== undefined ? { email } : {}),
-        ...(phone !== undefined ? { phone } : {}),
-        ...(industry !== undefined ? { industry } : {}),
-        ...(notes !== undefined ? { notes } : {}),
-      },
-    });
+    let lead;
+    try {
+      lead = await database.lead.update({
+        where: { id, userId: request.user!.id },
+        data: {
+          ...(input.company !== undefined ? { company: input.company } : {}),
+          ...(input.contact !== undefined ? { contact: input.contact } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.value !== undefined ? { value: input.value } : {}),
+          ...(email !== undefined ? { email } : {}),
+          ...(phone !== undefined ? { phone } : {}),
+          ...(industry !== undefined ? { industry } : {}),
+          ...(notes !== undefined ? { notes } : {}),
+        },
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === "P2025") throw new NotFoundError("Lead");
+      throw error;
+    }
 
     response.json({ data: { lead: serializeLead(lead) } });
   });

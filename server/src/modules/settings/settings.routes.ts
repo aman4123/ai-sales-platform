@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 
@@ -48,6 +49,13 @@ export function createSettingsRouter(database: DatabaseClient) {
 
   router.put("/", async (request, response) => {
     const input = updateSettingsSchema.parse(request.body);
+    if (input.aiProvider === "DEEPSEEK" && !env.DEEPSEEK_API_KEY) {
+      throw new AppError(
+        409,
+        "AI_PROVIDER_NOT_CONFIGURED",
+        "DeepSeek cannot be selected until its API key is configured.",
+      );
+    }
     const emailOwner = await database.user.findUnique({ where: { email: input.email } });
 
     if (emailOwner && emailOwner.id !== request.user!.id) {

@@ -4,8 +4,10 @@ import { Router, type CookieOptions, type Request } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError, UnauthorizedError } from "../../lib/errors.js";
+import { logger } from "../../lib/logger.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import { requireAuth } from "../../middleware/auth.js";
+import { authRateLimit } from "../../middleware/request-security.js";
 import {
   hashToken,
   signAccessToken,
@@ -37,11 +39,15 @@ const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
-const cookieOptions: CookieOptions = {
+const clearCookieOptions: CookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === "production",
   sameSite: "strict",
   path: "/api/auth",
+};
+
+const cookieOptions: CookieOptions = {
+  ...clearCookieOptions,
   maxAge: env.JWT_REFRESH_TTL_SECONDS * 1_000,
 };
 
@@ -91,6 +97,7 @@ async function createSession(
   const sessionId = randomUUID();
   const refreshToken = signRefreshToken(user.id, sessionId);
 
+  await database.refreshSession.deleteMany({ where: { expiresAt: { lt: new Date() } } });
   await database.refreshSession.create({
     data: {
       id: sessionId,
@@ -114,7 +121,7 @@ function authUser(user: UserWithSettings): AuthenticatedUser {
 export function createAuthRouter(database: DatabaseClient) {
   const router = Router();
 
-  router.post("/register", async (request, response) => {
+  router.post("/register", authRateLimit, async (request, response) => {
     const input = registerSchema.parse(request.body);
     const existing = await database.user.findUnique({ where: { email: input.email } });
 
@@ -153,7 +160,7 @@ export function createAuthRouter(database: DatabaseClient) {
     });
   });
 
-  router.post("/login", async (request, response) => {
+  router.post("/login", authRateLimit, async (request, response) => {
     const input = loginSchema.parse(request.body);
     const user = await database.user.findUnique({
       where: { email: input.email },
@@ -198,6 +205,10 @@ export function createAuthRouter(database: DatabaseClient) {
         where: { userId: session.userId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
+      logger.warn(
+        { userId: session.userId, sessionId: session.id, requestId: request.id },
+        "Refresh token reuse detected",
+      );
       throw new UnauthorizedError("Refresh token reuse was detected. Please sign in again.");
     }
 
@@ -205,14 +216,14 @@ export function createAuthRouter(database: DatabaseClient) {
     const nextRefreshToken = signRefreshToken(session.userId, nextSessionId);
     const now = new Date();
 
-    await database.$transaction(async (transaction) => {
+    const rotated = await database.$transaction(async (transaction) => {
       const revoked = await transaction.refreshSession.updateMany({
         where: { id: session.id, revokedAt: null },
         data: { revokedAt: now },
       });
 
       if (revoked.count !== 1) {
-        throw new UnauthorizedError("The refresh session has already been used.");
+        return false;
       }
 
       await transaction.refreshSession.create({
@@ -224,7 +235,21 @@ export function createAuthRouter(database: DatabaseClient) {
           ...sessionMetadata(request),
         },
       });
+
+      return true;
     });
+
+    if (!rotated) {
+      await database.refreshSession.updateMany({
+        where: { userId: session.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      logger.warn(
+        { userId: session.userId, sessionId: session.id, requestId: request.id },
+        "Concurrent refresh token reuse detected",
+      );
+      throw new UnauthorizedError("Refresh token reuse was detected. Please sign in again.");
+    }
 
     const user = session.user as UserWithSettings;
     response.cookie(REFRESH_COOKIE, nextRefreshToken, cookieOptions);
@@ -256,7 +281,7 @@ export function createAuthRouter(database: DatabaseClient) {
       }
     }
 
-    response.clearCookie(REFRESH_COOKIE, cookieOptions);
+    response.clearCookie(REFRESH_COOKIE, clearCookieOptions);
     response.status(204).send();
   });
 
