@@ -7,13 +7,14 @@ The existing dark dashboard experience is preserved while its former local-only 
 ## Capabilities
 
 - Registration, login, logout, short-lived JWT access tokens, and rotating HTTP-only refresh sessions
-- Per-user CRM lead creation, editing, deletion, search, status tracking, and deal values
-- Live dashboard and six-month reports calculated from PostgreSQL data
+- Per-user CRM lead creation, editing, deletion, indexed search, cursor pagination, status tracking, and deal values
+- Live dashboard and six-month reports aggregated in PostgreSQL without loading entire customer datasets
 - Database-backed profile, company, email, notification, theme, and AI-provider settings
 - Validated AI research and sales-email APIs with mock and optional DeepSeek providers
 - Request IDs, structured/redacted logs, Helmet headers, CORS policy, body limits, and tiered rate limits
 - Liveness and database-readiness probes
-- API tests, strict TypeScript, ESLint, dependency auditing, Docker, Compose, GitHub Actions, and Render configuration
+- Unit, browser, and real-PostgreSQL integration tests with enforced coverage floors
+- Strict TypeScript, ESLint, dependency auditing, hardened Docker/Compose, pinned GitHub Actions, and Render configuration
 
 ## Architecture
 
@@ -40,7 +41,7 @@ Requirements: Node.js 22.12–24, npm, and PostgreSQL 17+ (or Docker).
    npm ci
    ```
 
-2. Copy `.env.example` to an untracked `.env` and replace both JWT secrets with independent random strings of at least 32 characters.
+2. Copy `.env.example` to an untracked `.env`. Replace the database password in `POSTGRES_PASSWORD`, `DATABASE_URL`, and `COMPOSE_DATABASE_URL`, then replace both JWT secrets with different random strings of at least 32 characters.
 
 3. Start PostgreSQL only, if needed.
 
@@ -86,7 +87,8 @@ Never commit `.env` files. The repository ignores every `.env*` file except `.en
 | `npm run build` | Generate Prisma Client, type-check, and build frontend/server |
 | `npm run typecheck` | Type-check frontend and server |
 | `npm run lint` | Lint all authored TypeScript |
-| `npm test` | Run the API test suite |
+| `npm test` | Run the backend and browser test suites |
+| `npm run test:coverage` | Run all tests with enforced coverage floors |
 | `npm run prisma:validate` | Validate the Prisma schema |
 | `npm run db:migrate` | Create/apply a development migration |
 | `npm run db:deploy` | Apply committed migrations in CI/production |
@@ -107,7 +109,7 @@ Public endpoints:
 Bearer-token protected endpoints:
 
 - `GET /api/auth/me`
-- `GET|POST /api/leads`
+- `GET|POST /api/leads` (`GET` supports `search`, `status`, `limit`, and `cursor`)
 - `PUT|DELETE /api/leads/:id`
 - `GET|PUT /api/settings`
 - `GET /api/reports/summary`
@@ -126,8 +128,11 @@ Before a production rollout:
 2. Add `DEEPSEEK_API_KEY` in Render only if DeepSeek should be available.
 3. Deploy the Blueprint and register the first account through `/register`.
 4. Confirm readiness, authentication, CRM CRUD, and AI-provider behavior on the deployed URL.
+5. Confirm managed-database backups, retention, alerts, and restore access meet your recovery requirements.
 
 GitHub Actions validates migrations, lint, types, tests, production builds, dependency security, and the Docker image on feature pushes and pull requests.
+
+Operational checks, incident signals, backup expectations, and rollback guidance are documented in [`docs/OPERATIONS.md`](docs/OPERATIONS.md).
 
 ## Screenshots
 

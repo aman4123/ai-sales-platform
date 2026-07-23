@@ -27,12 +27,36 @@ services:
         generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
+      - key: JWT_ISSUER
+        value: ai-sales-platform
+      - key: JWT_AUDIENCE
+        value: ai-sales-platform-web
       - key: JWT_ACCESS_TTL_SECONDS
         value: 900
       - key: JWT_REFRESH_TTL_SECONDS
         value: 604800
       - key: BCRYPT_ROUNDS
         value: 12
+      - key: CORS_ORIGINS
+        value: ""
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX
+        value: 100
+      - key: AUTH_RATE_LIMIT_MAX
+        value: 10
+      - key: AI_RATE_LIMIT_WINDOW_MS
+        value: 3600000
+      - key: AI_RATE_LIMIT_MAX
+        value: 20
+      - key: AI_REQUEST_TIMEOUT_MS
+        value: 30000
+      - key: AI_RESPONSE_MAX_BYTES
+        value: 262144
+      - key: AI_MAX_TOKENS
+        value: 1500
+      - key: AI_HISTORY_RETENTION_DAYS
+        value: 90
 
 databases:
   - name: ai-sales-postgres

@@ -1,17 +1,17 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ai_sales
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-ai_sales}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_sales}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Copy .env.example to .env and set POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_sales"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -29,17 +29,26 @@ services:
       PORT: 4000
       SERVE_STATIC: "true"
       TRUST_PROXY: 0
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_sales?schema=public
-      JWT_ACCESS_SECRET: local-compose-access-secret-change-before-shared-use
-      JWT_REFRESH_SECRET: local-compose-refresh-secret-change-before-shared-use
+      DATABASE_URL: ${COMPOSE_DATABASE_URL:?Set COMPOSE_DATABASE_URL for the postgres service}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?Set a random JWT_ACCESS_SECRET of at least 32 characters}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set a different random JWT_REFRESH_SECRET of at least 32 characters}
+      JWT_ISSUER: ${JWT_ISSUER:-ai-sales-platform}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-ai-sales-platform-web}
       JWT_ACCESS_TTL_SECONDS: 900
       JWT_REFRESH_TTL_SECONDS: 604800
       BCRYPT_ROUNDS: 12
-      CORS_ORIGINS: http://localhost:4000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4000}
       LOG_LEVEL: info
     command: ["sh", "-c", "npm run db:deploy && node server/dist/index.js"]
     ports:
       - "4000:4000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   postgres_data:

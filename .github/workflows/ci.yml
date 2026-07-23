@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
         env:
           POSTGRES_DB: ai_sales_ci
           POSTGRES_USER: postgres
@@ -39,9 +39,10 @@ jobs:
       BCRYPT_ROUNDS: 4
       CORS_ORIGINS: http://localhost:5173
       SERVE_STATIC: "false"
+      RUN_DATABASE_TESTS: "true"
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -51,7 +52,7 @@ jobs:
       - run: npm run db:deploy
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
+      - run: npm run test:coverage
       - run: npm run build
       - run: npm audit --audit-level=high
 
@@ -60,5 +61,5 @@ jobs:
     needs: quality
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - run: docker build --tag ai-sales-platform:ci .
