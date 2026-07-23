@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import cookieParser from "cookie-parser";
 import compression from "compression";
 import cors from "cors";
 import express from "express";
@@ -94,7 +93,6 @@ export function createApp({ database, redis = null, emailService, serveStatic }:
     }),
   );
   app.use(express.json({ limit: "100kb" }));
-  app.use(cookieParser());
 
   app.get("/api/metrics", metrics.endpoint);
   app.use("/api", rateLimiters.api);

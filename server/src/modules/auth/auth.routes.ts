@@ -28,6 +28,7 @@ import {
   passwordSchema,
   recoveryCodeHash,
   recoveryCodeRows,
+  refreshTokenFromRequest,
   replaceAccountToken,
   serializeUser,
   sessionMetadata,
@@ -416,7 +417,7 @@ export function createAuthRouter(
   });
 
   router.post("/refresh", async (request, response) => {
-    const currentToken = request.cookies[REFRESH_COOKIE] as string | undefined;
+    const currentToken = refreshTokenFromRequest(request);
     if (!currentToken) throw new UnauthorizedError("No refresh session was provided.");
 
     const payload = verifyRefreshToken(currentToken);
@@ -492,7 +493,7 @@ export function createAuthRouter(
   });
 
   router.post("/logout", async (request, response) => {
-    const currentToken = request.cookies[REFRESH_COOKIE] as string | undefined;
+    const currentToken = refreshTokenFromRequest(request);
     if (currentToken) {
       try {
         const payload = verifyRefreshToken(currentToken);

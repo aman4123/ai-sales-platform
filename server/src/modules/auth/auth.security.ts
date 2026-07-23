@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { hash } from "bcryptjs";
+import { parseCookie } from "cookie";
 import type { CookieOptions, Request } from "express";
 import { z } from "zod";
 import { env } from "../../config/env.js";
@@ -44,6 +45,17 @@ export const cookieOptions: CookieOptions = {
   ...clearCookieOptions,
   maxAge: env.JWT_REFRESH_TTL_SECONDS * 1_000,
 };
+
+export function refreshTokenFromRequest(request: Request) {
+  const cookieHeader = request.get("cookie");
+  if (!cookieHeader) return undefined;
+
+  try {
+    return parseCookie(cookieHeader)[REFRESH_COOKIE];
+  } catch {
+    return undefined;
+  }
+}
 
 export interface UserWithSettings {
   id: string;
