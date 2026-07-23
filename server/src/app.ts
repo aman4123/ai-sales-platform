@@ -44,15 +44,16 @@ export function createApp({ database, serveStatic }: AppOptions) {
   );
   app.use(helmet());
   app.use(
-    cors({
-      credentials: true,
-      origin(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
-          callback(null, true);
-          return;
-        }
-        callback(new AppError(403, "ORIGIN_NOT_ALLOWED", "This request origin is not allowed."));
-      },
+    cors((request, callback) => {
+      const origin = request.get("origin");
+      const sameOrigin = `${request.protocol}://${request.get("host")}`;
+
+      if (!origin || origin === sameOrigin || allowedOrigins.includes(origin)) {
+        callback(null, { credentials: true, origin: true });
+        return;
+      }
+
+      callback(new AppError(403, "ORIGIN_NOT_ALLOWED", "This request origin is not allowed."));
     }),
   );
   app.use(express.json({ limit: "100kb" }));
