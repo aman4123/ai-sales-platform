@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, refreshSession, setAccessToken } from "../services/api";
-import type { AuthPayload, AuthUser } from "../types/api";
+import type { AuthPayload, AuthUser, RegistrationPayload } from "../types/api";
 import { AuthContext, type AuthContextValue } from "./auth-context";
 let initialSession: Promise<AuthPayload> | null = null;
 
 function bootstrapSession() {
-  initialSession ??= refreshSession();
+  initialSession ??= refreshSession().finally(() => {
+    initialSession = null;
+  });
   return initialSession;
 }
 
@@ -15,7 +17,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    const expire = () => setUser(null);
+    const expire = () => {
+      setAccessToken(null);
+      setUser(null);
+    };
     window.addEventListener("auth:expired", expire);
 
     void bootstrapSession()
@@ -35,6 +40,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const preference = user?.settings.theme ?? "DARK";
+    const media = typeof window.matchMedia === "function"
+      ? window.matchMedia("(prefers-color-scheme: dark)")
+      : null;
+    const applyTheme = () => {
+      const dark = preference === "DARK" || (preference === "SYSTEM" && (media?.matches ?? true));
+      const resolved = dark ? "dark" : "light";
+      document.documentElement.dataset.colorTheme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    };
+
+    applyTheme();
+    if (preference === "SYSTEM") media?.addEventListener("change", applyTheme);
+    return () => media?.removeEventListener("change", applyTheme);
+  }, [user?.settings.theme]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -45,13 +67,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(response.data.data.user);
       },
       async register(name, email, password) {
-        const response = await api.post<{ data: AuthPayload }>("/auth/register", {
+        const response = await api.post<{ data: RegistrationPayload }>("/auth/register", {
           name,
           email,
           password,
         });
-        setAccessToken(response.data.data.accessToken);
-        setUser(response.data.data.user);
+        return response.data.data;
+      },
+      acceptSession(session) {
+        setAccessToken(session.accessToken);
+        setUser(session.user);
       },
       async logout() {
         try {

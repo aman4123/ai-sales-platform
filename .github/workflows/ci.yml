@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
         env:
           POSTGRES_DB: ai_sales_ci
           POSTGRES_USER: postgres
@@ -31,34 +31,157 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:8.2-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       NODE_ENV: test
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_ci?schema=public
+      REDIS_URL: redis://localhost:6379
+      POSTGRES_PASSWORD: postgres
+      COMPOSE_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_sales_ci?schema=public
+      COMPOSE_REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ci-access-secret-that-is-longer-than-thirty-two-characters
       JWT_REFRESH_SECRET: ci-refresh-secret-that-is-longer-than-thirty-two-characters
       BCRYPT_ROUNDS: 4
       CORS_ORIGINS: http://localhost:5173
       SERVE_STATIC: "false"
+      RUN_DATABASE_TESTS: "true"
+      METRICS_AUTH_TOKEN: ci-metrics-secret-that-is-longer-than-thirty-two-characters
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Scan repository for committed secrets
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854 dir /repo --no-banner --redact --exit-code=1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run prisma:validate
+      - run: npm run api:lint
+      - run: npm run deploy:lint
       - run: npm run prisma:generate
       - run: npm run db:deploy
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
+      - run: npm run test:coverage
       - run: npm run build
       - run: npm audit --audit-level=high
+      - run: docker compose config --quiet
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: ai_sales_e2e
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ai_sales_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.2-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      CI: "true"
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_e2e?schema=public
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run db:deploy
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
 
   container:
     runs-on: ubuntu-latest
     needs: quality
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: ai_sales_container
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ai_sales_container"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.2-alpine@sha256:223b183cbc49f5ff48728e1fc52ccf101f05072decad2bd9867281a3c9bf75fd
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_container?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: container-access-secret-that-is-longer-than-thirty-two-characters
+      JWT_REFRESH_SECRET: container-refresh-secret-that-is-longer-than-thirty-two-characters
+      METRICS_AUTH_TOKEN: container-metrics-token-that-is-longer-than-thirty-two-characters
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - run: docker build --tag ai-sales-platform:ci .
+      - name: Apply migrations with the production image
+        run: docker run --rm --network host -e DATABASE_URL -e REDIS_URL -e JWT_ACCESS_SECRET -e JWT_REFRESH_SECRET -e METRICS_AUTH_TOKEN -e NODE_ENV=test ai-sales-platform:ci node node_modules/prisma/build/index.js migrate deploy
+      - name: Smoke test the production image
+        run: |
+          docker run --detach --name ai-sales-platform-ci --network host \
+            -e NODE_ENV=production -e PORT=4000 -e SERVE_STATIC=true -e TRUST_PROXY=0 \
+            -e DATABASE_URL -e REDIS_URL -e JWT_ACCESS_SECRET -e JWT_REFRESH_SECRET \
+            -e METRICS_AUTH_TOKEN -e APP_BASE_URL=https://sales.example.com \
+            -e EMAIL_DELIVERY_MODE=smtp -e EMAIL_FROM=no-reply@sales.example.com \
+            -e SMTP_HOST=smtp.example.com ai-sales-platform:ci
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4000/api/health/ready; then exit 0; fi
+            sleep 2
+          done
+          docker logs ai-sales-platform-ci
+          exit 1
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ai-sales-platform:ci
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+      - if: always()
+        run: docker rm --force ai-sales-platform-ci || true

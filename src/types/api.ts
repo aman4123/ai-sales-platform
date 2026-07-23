@@ -12,6 +12,7 @@ export interface UserSettings {
 export interface AuthUser {
   id: string;
   email: string;
+  emailVerified: boolean;
   name: string;
   role: "ADMIN" | "MEMBER";
   settings: UserSettings;
@@ -20,6 +21,16 @@ export interface AuthUser {
 export interface AuthPayload {
   user: AuthUser;
   accessToken: string;
+}
+
+export interface RegistrationPayload {
+  email: string;
+  verificationRequired: true;
+  developmentVerificationToken?: string;
+}
+
+export interface VerificationPayload extends AuthPayload {
+  recoveryCodes: string[];
 }
 
 export interface SettingsPayload extends UserSettings {

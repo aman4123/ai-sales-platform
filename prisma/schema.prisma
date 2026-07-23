@@ -39,18 +39,52 @@ enum AiRequestType {
   EMAIL
 }
 
+enum AccountTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
 model User {
-  id           String           @id @default(cuid())
-  email        String           @unique
-  passwordHash String
-  name         String
-  role         UserRole         @default(ADMIN)
-  leads        Lead[]
-  settings     UserSettings?
-  sessions     RefreshSession[]
-  aiRequests   AiRequest[]
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  id                String           @id @default(cuid())
+  email             String           @unique
+  emailVerifiedAt   DateTime?
+  passwordHash      String
+  passwordChangedAt DateTime?
+  name              String
+  role              UserRole         @default(MEMBER)
+  leads             Lead[]
+  settings          UserSettings?
+  sessions          RefreshSession[]
+  aiRequests        AiRequest[]
+  accountTokens     AccountToken[]
+  recoveryCodes     RecoveryCode[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model AccountToken {
+  id        String           @id @default(cuid())
+  tokenHash String           @unique
+  type      AccountTokenType
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, expiresAt])
+  @@index([expiresAt])
+}
+
+model RecoveryCode {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  userId    String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
 }
 
 model RefreshSession {
@@ -83,8 +117,12 @@ model Lead {
   updatedAt DateTime   @updatedAt
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId, createdAt])
+  @@index([userId, createdAt, id])
   @@index([userId, status])
+  @@index([company(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_company_trgm_idx")
+  @@index([contact(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_contact_trgm_idx")
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_email_trgm_idx")
+  @@index([industry(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_industry_trgm_idx")
 }
 
 model UserSettings {

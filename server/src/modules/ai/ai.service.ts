@@ -10,6 +10,45 @@ const deepSeekResponseSchema = z.object({
   ).min(1),
 });
 
+async function readProviderPayload(response: Response): Promise<unknown> {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > env.AI_RESPONSE_MAX_BYTES) {
+    await response.body?.cancel();
+    throw new AppError(502, "AI_PROVIDER_RESPONSE_TOO_LARGE", "The AI provider response was too large.");
+  }
+
+  if (!response.body) {
+    throw new AppError(502, "AI_PROVIDER_RESPONSE_INVALID", "The AI provider returned no response.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let body = "";
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    received += chunk.value.byteLength;
+    if (received > env.AI_RESPONSE_MAX_BYTES) {
+      await reader.cancel();
+      throw new AppError(
+        502,
+        "AI_PROVIDER_RESPONSE_TOO_LARGE",
+        "The AI provider response was too large.",
+      );
+    }
+    body += decoder.decode(chunk.value, { stream: true });
+  }
+  body += decoder.decode();
+
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    throw new AppError(502, "AI_PROVIDER_RESPONSE_INVALID", "The AI provider response was invalid.");
+  }
+}
+
 export function mockResearch(prompt: string): string {
   return `AI Sales Analysis
 
@@ -81,6 +120,7 @@ export async function askDeepSeek(systemPrompt: string, userPrompt: string): Pro
           { role: "user", content: userPrompt },
         ],
         temperature: 0.4,
+        max_tokens: env.AI_MAX_TOKENS,
         stream: false,
       }),
       signal: AbortSignal.timeout(env.AI_REQUEST_TIMEOUT_MS),
@@ -93,10 +133,11 @@ export async function askDeepSeek(systemPrompt: string, userPrompt: string): Pro
   }
 
   if (!result.ok) {
+    await result.body?.cancel();
     throw new AppError(502, "AI_PROVIDER_ERROR", "The AI provider rejected the request.");
   }
 
-  const payload = deepSeekResponseSchema.safeParse(await result.json());
+  const payload = deepSeekResponseSchema.safeParse(await readProviderPayload(result));
   if (!payload.success) {
     throw new AppError(502, "AI_PROVIDER_RESPONSE_INVALID", "The AI provider response was invalid.");
   }

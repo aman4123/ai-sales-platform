@@ -32,6 +32,8 @@ export function signAccessToken(user: AuthenticatedUser): string {
       jwtid: randomUUID(),
       expiresIn: env.JWT_ACCESS_TTL_SECONDS,
       algorithm: "HS256",
+      issuer: env.JWT_ISSUER,
+      audience: env.JWT_AUDIENCE,
     },
   );
 }
@@ -41,13 +43,19 @@ export function signRefreshToken(userId: string, sessionId: string): string {
     subject: userId,
     expiresIn: env.JWT_REFRESH_TTL_SECONDS,
     algorithm: "HS256",
+    issuer: env.JWT_ISSUER,
+    audience: env.JWT_AUDIENCE,
   });
 }
 
 export function verifyAccessToken(token: string): AuthenticatedUser {
   try {
     const payload = accessPayloadSchema.parse(
-      jwt.verify(token, env.JWT_ACCESS_SECRET, { algorithms: ["HS256"] }),
+      jwt.verify(token, env.JWT_ACCESS_SECRET, {
+        algorithms: ["HS256"],
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE,
+      }),
     );
 
     return { id: payload.sub, email: payload.email, role: payload.role };
@@ -59,7 +67,11 @@ export function verifyAccessToken(token: string): AuthenticatedUser {
 export function verifyRefreshToken(token: string): { userId: string; sessionId: string } {
   try {
     const payload = refreshPayloadSchema.parse(
-      jwt.verify(token, env.JWT_REFRESH_SECRET, { algorithms: ["HS256"] }),
+      jwt.verify(token, env.JWT_REFRESH_SECRET, {
+        algorithms: ["HS256"],
+        issuer: env.JWT_ISSUER,
+        audience: env.JWT_AUDIENCE,
+      }),
     );
 
     return { userId: payload.sub, sessionId: payload.sid };

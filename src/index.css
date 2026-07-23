@@ -1,1 +1,60 @@
 @import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+html[data-color-theme="light"] .bg-slate-950 {
+  background-color: #f8fafc;
+}
+
+html[data-color-theme="light"] .bg-slate-900 {
+  background-color: #ffffff;
+}
+
+html[data-color-theme="light"] .bg-slate-800 {
+  background-color: #e2e8f0;
+}
+
+html[data-color-theme="light"] .border-slate-800,
+html[data-color-theme="light"] .border-slate-700 {
+  border-color: #cbd5e1;
+}
+
+html[data-color-theme="light"] .bg-slate-950.text-white,
+html[data-color-theme="light"] .text-slate-200,
+html[data-color-theme="light"] .text-slate-300,
+html[data-color-theme="light"] input,
+html[data-color-theme="light"] select,
+html[data-color-theme="light"] textarea,
+html[data-color-theme="light"] h1.text-white,
+html[data-color-theme="light"] h2.text-white {
+  color: #0f172a;
+}
+
+html[data-color-theme="light"] .text-slate-400 {
+  color: #475569;
+}
+
+html[data-color-theme="light"] button[class*="bg-blue-"],
+html[data-color-theme="light"] button[class*="bg-green-"],
+html[data-color-theme="light"] button[class*="bg-red-"],
+html[data-color-theme="light"] a[class*="bg-blue-"] {
+  color: #ffffff;
+}
+
+:focus-visible {
+  outline: 2px solid #60a5fa !important;
+  outline-offset: 3px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

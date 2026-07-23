@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import AuthShell from "../components/auth/AuthShell";
 import { useAuth } from "../contexts/auth-context";
 import { apiErrorMessage } from "../services/api";
+import type { RegistrationPayload } from "../types/api";
 
 interface LoginProps {
   mode: "login" | "register";
@@ -16,6 +18,7 @@ export default function Login({ mode }: LoginProps) {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [registration, setRegistration] = useState<RegistrationPayload | null>(null);
   const isRegister = mode === "register";
 
   if (user) return <Navigate to="/dashboard" replace />;
@@ -26,8 +29,11 @@ export default function Login({ mode }: LoginProps) {
     setError("");
 
     try {
-      if (isRegister) await register(name, email, password);
-      else await login(email, password);
+      if (isRegister) {
+        setRegistration(await register(name, email, password));
+        return;
+      }
+      await login(email, password);
 
       const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
       navigate(from || "/dashboard", { replace: true });
@@ -38,27 +44,51 @@ export default function Login({ mode }: LoginProps) {
     }
   }
 
+  if (registration) {
+    const verificationPath = registration.developmentVerificationToken
+      ? `/verify-email?token=${encodeURIComponent(registration.developmentVerificationToken)}`
+      : null;
+    return (
+      <AuthShell title="Check your email">
+        <p role="status" className="mt-6 text-slate-300">
+          We sent a verification link to <strong>{registration.email}</strong>. Verify the address before signing in.
+        </p>
+        {verificationPath && (
+          <Link className="mt-6 block rounded bg-blue-600 py-3 text-center text-white" to={verificationPath}>
+            Open development verification link
+          </Link>
+        )}
+        <Link className="mt-5 block text-center text-blue-400 hover:underline" to="/login">
+          Return to login
+        </Link>
+      </AuthShell>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-      <form onSubmit={submit} className="bg-slate-900 p-8 rounded-xl w-96">
-        <h2 className="text-3xl font-bold text-white">
-          {isRegister ? "Create Account" : "Login"}
-        </h2>
+    <AuthShell title={isRegister ? "Create Account" : "Login"}>
+      <form onSubmit={submit}>
 
         {isRegister && (
-          <input
-            className="w-full mt-6 p-3 rounded bg-slate-800 text-white"
-            placeholder="Full Name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            autoComplete="name"
-            minLength={2}
-            maxLength={100}
-            required
-          />
+          <div className="mt-6">
+            <label className="sr-only" htmlFor="auth-name">Full name</label>
+            <input
+              id="auth-name"
+              className="w-full rounded bg-slate-800 p-3 text-white"
+              placeholder="Full Name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoComplete="name"
+              minLength={2}
+              maxLength={100}
+              required
+            />
+          </div>
         )}
 
+        <label className="sr-only" htmlFor="auth-email">Email address</label>
         <input
+          id="auth-email"
           type="email"
           className={`w-full ${isRegister ? "mt-4" : "mt-6"} p-3 rounded bg-slate-800 text-white`}
           placeholder="Email"
@@ -69,14 +99,16 @@ export default function Login({ mode }: LoginProps) {
           required
         />
 
+        <label className="sr-only" htmlFor="auth-password">Password</label>
         <input
+          id="auth-password"
           type="password"
           className="w-full mt-4 p-3 rounded bg-slate-800 text-white"
           placeholder="Password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           autoComplete={isRegister ? "new-password" : "current-password"}
-          minLength={isRegister ? 8 : 1}
+          minLength={isRegister ? 12 : 1}
           maxLength={128}
           required
         />
@@ -101,7 +133,14 @@ export default function Login({ mode }: LoginProps) {
             {isRegister ? "Login" : "Register"}
           </Link>
         </p>
+        {!isRegister && (
+          <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm">
+            <Link className="text-blue-400 hover:underline" to="/forgot-password">Forgot password?</Link>
+            <Link className="text-blue-400 hover:underline" to="/recover-account">Use recovery code</Link>
+            <Link className="text-blue-400 hover:underline" to="/resend-verification">Resend verification</Link>
+          </div>
+        )}
       </form>
-    </div>
+    </AuthShell>
   );
 }
