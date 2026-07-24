@@ -49,8 +49,15 @@ if (freeService.previews?.generation === "automatic") {
 if (freeService.preDeployCommand) {
   throw new Error("Render Free does not support pre-deploy commands.");
 }
-if (!freeService.dockerCommand?.includes("prisma/build/index.js migrate deploy")) {
-  throw new Error("The Free web service must apply committed Prisma migrations before startup.");
+if (freeService.dockerCommand !== "/usr/local/bin/ai-sales-start") {
+  throw new Error("The Free web service must use the packaged startup executable.");
+}
+const startupScript = await readFile("docker-entrypoint.sh", "utf8");
+if (
+  !startupScript.includes("node node_modules/prisma/build/index.js migrate deploy") ||
+  !startupScript.includes("exec node server/dist/index.js")
+) {
+  throw new Error("The startup executable must apply migrations and exec the API server.");
 }
 if (freeService.envVars?.some(({ key }) => key === "DEEPSEEK_API_KEY")) {
   throw new Error("The zero-cost Blueprint must not activate a paid AI provider.");
