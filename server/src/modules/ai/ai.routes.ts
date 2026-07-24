@@ -4,7 +4,9 @@ import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import type { RedisClient } from "../../lib/redis.js";
-import { askDeepSeek, mockEmail, mockResearch } from "./ai.service.js";
+import { askGroq, mockEmail, mockResearch } from "./ai.service.js";
+
+type AiProvider = "MOCK" | "GROQ";
 
 const researchSchema = z.object({
   prompt: z.string().trim().min(3).max(4_000),
@@ -27,7 +29,7 @@ async function persistActivity(
   activity: {
     userId: string;
     type: "RESEARCH" | "EMAIL";
-    provider: "MOCK" | "DEEPSEEK";
+    provider: AiProvider;
     prompt: string;
     response: string;
   },
@@ -51,7 +53,7 @@ export async function consumeMonthlyAiRequest(redis: RedisClient | null, now = n
   }
 
   const month = now.toISOString().slice(0, 7);
-  const key = `budget:ai:deepseek:${month}`;
+  const key = `budget:ai:groq:${month}`;
   const count = Number(await redis.sendCommand(["INCR", key]));
   if (!Number.isSafeInteger(count) || count < 1) {
     throw new AppError(503, "AI_BUDGET_UNAVAILABLE", "The AI budget guard is unavailable.");
@@ -69,19 +71,28 @@ export async function consumeMonthlyAiRequest(redis: RedisClient | null, now = n
   }
 }
 
+export function resolveAiProvider(
+  configuredProvider: AiProvider,
+  apiKey: string | undefined = env.GROQ_API_KEY,
+): AiProvider {
+  return configuredProvider === "GROQ" && apiKey?.trim() ? "GROQ" : "MOCK";
+}
+
 export function createAiRouter(database: DatabaseClient, redis: RedisClient | null) {
   const router = Router();
 
   router.post("/research", async (request, response) => {
     const input = researchSchema.parse(request.body);
     const settings = await providerFor(database, request.user!.id);
+    const provider = resolveAiProvider(settings.aiProvider);
     const result =
-      settings.aiProvider === "DEEPSEEK"
+      provider === "GROQ"
         ? await (async () => {
             await consumeMonthlyAiRequest(redis);
-            return askDeepSeek(
+            return askGroq(
               "You are a careful B2B sales research analyst. Give factual, structured, concise research. Clearly label uncertainty and never invent private contact data.",
               input.prompt,
+              { temperature: 0.3 },
             );
           })()
         : mockResearch(input.prompt);
@@ -89,25 +100,27 @@ export function createAiRouter(database: DatabaseClient, redis: RedisClient | nu
     await persistActivity(database, {
       userId: request.user!.id,
       type: "RESEARCH",
-      provider: settings.aiProvider,
+      provider,
       prompt: input.prompt,
       response: result,
     });
 
-    response.json({ data: { result, provider: settings.aiProvider } });
+    response.json({ data: { result, provider } });
   });
 
   router.post("/email", async (request, response) => {
     const input = emailSchema.parse(request.body);
     const settings = await providerFor(database, request.user!.id);
-    const prompt = `Write a ${input.tone.toLowerCase()} B2B sales email for ${input.contact} at ${input.company}, a company in ${input.industry}. Include a subject, greeting, concise value proposition, call to action, and closing.${settings.signature ? ` Use this signature: ${settings.signature}` : ""}`;
+    const provider = resolveAiProvider(settings.aiProvider);
+    const prompt = `Write a fresh, specific ${input.tone.toLowerCase()} B2B sales email for ${input.contact} at ${input.company}, a company in ${input.industry}. Create an original subject line and wording for this request. Include a greeting, concise relevant value proposition, low-friction call to action, and closing. Avoid clichés, fabricated facts, and placeholders.${settings.signature ? ` Use this exact signature: ${settings.signature}` : ""}`;
     const result =
-      settings.aiProvider === "DEEPSEEK"
+      provider === "GROQ"
         ? await (async () => {
             await consumeMonthlyAiRequest(redis);
-            return askDeepSeek(
-              "You write concise, truthful B2B sales emails. Do not make unsupported claims or use manipulative language.",
+            return askGroq(
+              "You write concise, truthful, personalized B2B sales emails. Produce a distinct variation for every request. Do not make unsupported claims or use manipulative language.",
               prompt,
+              { temperature: 0.8 },
             );
           })()
         : mockEmail({ ...input, signature: settings.signature });
@@ -115,12 +128,12 @@ export function createAiRouter(database: DatabaseClient, redis: RedisClient | nu
     await persistActivity(database, {
       userId: request.user!.id,
       type: "EMAIL",
-      provider: settings.aiProvider,
+      provider,
       prompt,
       response: result,
     });
 
-    response.json({ data: { result, provider: settings.aiProvider } });
+    response.json({ data: { result, provider } });
   });
 
   return router;

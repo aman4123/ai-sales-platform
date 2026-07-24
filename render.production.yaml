@@ -90,6 +90,10 @@ services:
         value: 3600000
       - key: AI_RATE_LIMIT_MAX
         value: 20
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: AI_REQUEST_TIMEOUT_MS
         value: 30000
       - key: AI_RESPONSE_MAX_BYTES

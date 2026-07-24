@@ -89,6 +89,9 @@ services:
       AUTH_RATE_LIMIT_MAX: ${AUTH_RATE_LIMIT_MAX:-10}
       AI_RATE_LIMIT_WINDOW_MS: ${AI_RATE_LIMIT_WINDOW_MS:-3600000}
       AI_RATE_LIMIT_MAX: ${AI_RATE_LIMIT_MAX:-20}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      AI_MONTHLY_REQUEST_LIMIT: ${AI_MONTHLY_REQUEST_LIMIT:-0}
       LOG_LEVEL: info
     command: ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node server/dist/index.js"]
     ports:

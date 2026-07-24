@@ -7,7 +7,6 @@ const productionEnvironment = {
   JWT_ACCESS_SECRET: "independent-access-secret-1234567890",
   JWT_REFRESH_SECRET: "independent-refresh-secret-0987654321",
   CORS_ORIGINS: "",
-  DEEPSEEK_API_URL: "https://api.deepseek.com",
   APP_BASE_URL: "https://sales.example.com",
   EMAIL_DELIVERY_MODE: "smtp",
   EMAIL_FROM: "no-reply@sales.example.com",
@@ -64,6 +63,20 @@ describe("production environment validation", () => {
         EMAIL_DELIVERY_MODE: "resend",
         HOST: "0.0.0.0",
       },
+    });
+  });
+
+  it("accepts optional Groq configuration without exposing it to the client", async () => {
+    applyEnvironment({
+      GROQ_API_KEY: "test-groq-api-key-with-safe-length",
+      GROQ_MODEL: "openai/gpt-oss-120b",
+    });
+
+    const configuration = await import("./env.js");
+
+    expect(configuration.env).toMatchObject({
+      GROQ_API_KEY: "test-groq-api-key-with-safe-length",
+      GROQ_MODEL: "openai/gpt-oss-120b",
     });
   });
 

@@ -1,4 +1,4 @@
-export type AiProvider = "MOCK" | "DEEPSEEK";
+export type AiProvider = "MOCK" | "GROQ";
 export type Theme = "DARK" | "LIGHT" | "SYSTEM";
 
 export interface UserSettings {

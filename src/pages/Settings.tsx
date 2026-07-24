@@ -81,7 +81,7 @@ export default function Settings() {
             <div>
               <label className="mb-2 block text-slate-400" htmlFor="settings-provider">AI Provider</label>
               <select id="settings-provider" value={provider} onChange={(event) => setProvider(event.target.value as AiProvider)} className="w-full rounded-lg bg-slate-800 p-3">
-                <option value="MOCK">Mock AI</option><option value="DEEPSEEK">DeepSeek</option>
+                <option value="MOCK">Mock AI</option><option value="GROQ">Groq</option>
               </select>
             </div>
             <div>

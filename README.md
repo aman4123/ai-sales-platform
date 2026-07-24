@@ -1,6 +1,6 @@
 # AI Sales Platform
 
-A production-oriented AI sales CRM with a React/Vite frontend, Express/TypeScript API, PostgreSQL, Prisma, secure JWT sessions, database-backed analytics, and optional DeepSeek generation.
+A production-oriented AI sales CRM with a React/Vite frontend, Express/TypeScript API, PostgreSQL, Prisma, secure JWT sessions, database-backed analytics, and optional Groq generation.
 
 The existing dark dashboard experience is preserved while its former local-only data layer is replaced with an authenticated multi-user backend.
 
@@ -10,7 +10,7 @@ The existing dark dashboard experience is preserved while its former local-only 
 - Per-user CRM lead creation, editing, deletion, indexed search, cursor pagination, status tracking, and deal values
 - Live dashboard and six-month reports aggregated in PostgreSQL without loading entire customer datasets
 - Database-backed profile, company, email, notification, theme, and AI-provider settings
-- Validated AI research and sales-email APIs with mock and optional DeepSeek providers
+- Validated AI research and sales-email APIs with Mock AI and optional Groq providers
 - Request IDs, structured/redacted logs, Helmet headers, CORS policy, body limits, and Redis-backed distributed rate limits
 - Liveness plus PostgreSQL/Redis readiness probes, authenticated Prometheus metrics, and alert rules
 - Unit, integration, and Chromium/Firefox/WebKit end-to-end tests with enforced coverage floors
@@ -79,7 +79,7 @@ All supported variables are documented in `.env.example`. Important production v
 - `TRUST_PROXY`: set to `1` behind a single trusted reverse proxy such as Render
 - `APP_BASE_URL`, `EMAIL_FROM`, and either `RESEND_API_KEY` or `SMTP_*`: verified-account email delivery
 - `METRICS_AUTH_TOKEN`: bearer credential for `/api/metrics`
-- `DEEPSEEK_API_KEY` and a positive `AI_MONTHLY_REQUEST_LIMIT`: optional and both required before a user can select DeepSeek
+- `GROQ_API_KEY`, `GROQ_MODEL`, and a positive `AI_MONTHLY_REQUEST_LIMIT`: optional server-only Groq configuration; without a key, requests safely use Mock AI
 - `SERVE_STATIC`: set to `true` when Express should serve the built frontend
 
 Never commit `.env` files. The repository ignores every `.env*` file except `.env.example`.

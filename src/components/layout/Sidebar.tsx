@@ -154,7 +154,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           <div className="rounded-xl bg-slate-800 p-4">
             <p className="text-sm text-slate-400">AI Provider</p>
             <p className="mt-1 font-semibold">
-              {user?.settings.aiProvider === "DEEPSEEK" ? "DeepSeek" : "Mock AI"}
+              {user?.settings.aiProvider === "GROQ" ? "Groq" : "Mock AI"}
             </p>
           </div>
         </div>

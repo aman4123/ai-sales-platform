@@ -7,7 +7,7 @@
 - Keep `CORS_ORIGINS` empty for same-origin deployment. Add only exact origins. Set `TRUST_PROXY` to the exact trusted proxy count; Render uses one.
 - Set `APP_BASE_URL` to the public HTTPS origin. Production validation rejects insecure application URLs, absent Redis, log-only email, incomplete SMTP/Resend configuration, and weak or absent metrics credentials.
 - Neon deployments use a pooled TLS `DATABASE_URL` at runtime and a direct TLS `DIRECT_URL` for migrations/backups. Upstash production URLs must use `rediss://`.
-- Configure `DEEPSEEK_API_KEY` only after paid-AI approval and set an explicit positive `AI_MONTHLY_REQUEST_LIMIT`. The settings API rejects providers without both controls.
+- Configure the server-only `GROQ_API_KEY` and `GROQ_MODEL` only after AI-spend approval, then set an explicit positive `AI_MONTHLY_REQUEST_LIMIT`. With no Groq key, Groq-selected accounts safely use Mock AI.
 
 ## Deployment
 

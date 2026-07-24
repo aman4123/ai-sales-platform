@@ -98,9 +98,8 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   AI_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).default(3_600_000),
   AI_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
-  DEEPSEEK_API_KEY: optionalSecret,
-  DEEPSEEK_API_URL: z.string().url().default("https://api.deepseek.com"),
-  DEEPSEEK_MODEL: z.string().min(1).default("deepseek-chat"),
+  GROQ_API_KEY: optionalSecret,
+  GROQ_MODEL: z.string().trim().min(1).default("openai/gpt-oss-120b"),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   AI_RESPONSE_MAX_BYTES: z.coerce.number().int().min(1_024).max(1_048_576).default(262_144),
   AI_MAX_TOKENS: z.coerce.number().int().min(64).max(8_192).default(1_500),
@@ -283,17 +282,6 @@ const envSchema = z.object({
         message: `Invalid browser origin: ${origin}`,
       });
     }
-  }
-
-  if (
-    configuration.NODE_ENV === "production" &&
-    new URL(configuration.DEEPSEEK_API_URL).protocol !== "https:"
-  ) {
-    context.addIssue({
-      code: "custom",
-      path: ["DEEPSEEK_API_URL"],
-      message: "The production AI provider URL must use HTTPS.",
-    });
   }
 
   if (

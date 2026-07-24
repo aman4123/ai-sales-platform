@@ -168,12 +168,15 @@ describe("primary application pages", () => {
   it("saves profile settings", async () => {
     const user = userEvent.setup();
     withRouter(<Settings />);
+    expect(screen.getByRole("option", { name: "Mock AI" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Groq" })).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Company"));
     await user.type(screen.getByLabelText("Company"), "Updated Co");
+    await user.selectOptions(screen.getByLabelText("AI Provider"), "GROQ");
     await user.click(screen.getByRole("button", { name: /Save Settings/ }));
     expect(mockedPut).toHaveBeenCalledWith(
       "/settings",
-      expect.objectContaining({ company: "Updated Co" }),
+      expect.objectContaining({ company: "Updated Co", aiProvider: "GROQ" }),
     );
   });
 

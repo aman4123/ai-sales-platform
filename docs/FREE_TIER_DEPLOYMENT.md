@@ -12,7 +12,7 @@ Limits and prices below were verified against provider documentation on 24 July 
 | Neon PostgreSQL | Free | ₹0 | Do not upgrade to Launch or enter billing details. |
 | Upstash Redis | Free | ₹0 | Do not add a card or upgrade to Pay as You Go. |
 | Resend email | Free | ₹0 | Do not upgrade. Free quota exhaustion stops sending; it does not enable paid overages. |
-| AI | Built-in Mock provider | ₹0 | Keep `DEEPSEEK_API_KEY` absent and `AI_MONTHLY_REQUEST_LIMIT=0`. |
+| AI | Built-in Mock provider | ₹0 | Keep `GROQ_API_KEY` absent and `AI_MONTHLY_REQUEST_LIMIT=0`. |
 | **Total** |  | **₹0/month** | No provider has permission to charge. |
 
 Render's Hobby workspace currently includes 5 GB outbound bandwidth and 500 build minutes/month. A workspace with no payment method is suspended or has new builds disabled when an included limit is exhausted instead of being charged. A linked payment method can make excess bandwidth or build usage billable, so a no-card workspace is mandatory for this deployment.
@@ -99,7 +99,8 @@ Values marked secret must be entered only in provider dashboards.
 | `JWT_ACCESS_SECRET` | yes | yes | Generated automatically by Render Blueprint |
 | `JWT_REFRESH_SECRET` | yes | yes | Generated automatically by Render Blueprint |
 | `METRICS_AUTH_TOKEN` | yes | yes | Generated automatically by Render Blueprint |
-| `DEEPSEEK_API_KEY` | no | yes | Leave absent for ₹0 operation |
+| `GROQ_API_KEY` | no | yes | Leave absent for ₹0 operation |
+| `GROQ_MODEL` | no | no | `openai/gpt-oss-120b` when Groq is approved |
 | `AI_MONTHLY_REQUEST_LIMIT` | yes | no | Keep `0` for ₹0 operation |
 
 All other production values are non-secret defaults in `render.yaml`. `.env` files remain ignored; only `.env.example` is committed.
@@ -121,7 +122,7 @@ Replace `$APP_URL` locally with the Render HTTPS URL; do not store it in source 
 
 ## AI cost controls
 
-Mock AI is the only enabled provider in this deployment and has no provider cost. Supplying a DeepSeek key alone is insufficient: an administrator must also set a positive `AI_MONTHLY_REQUEST_LIMIT`. Real-provider calls are then protected by:
+Mock AI is the only enabled provider in this deployment and has no provider cost. A Groq-selected account also falls back to Mock AI while `GROQ_API_KEY` is absent. Supplying a Groq key alone is insufficient to make real calls: an administrator must also set a positive `AI_MONTHLY_REQUEST_LIMIT`. Real-provider calls are then protected by:
 
 - per-user distributed limit of 10 AI requests/hour in the free Blueprint;
 - a global Redis-backed monthly request counter;

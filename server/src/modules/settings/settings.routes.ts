@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { z } from "zod";
-import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 
@@ -9,7 +8,7 @@ const updateSettingsSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
   company: z.string().trim().max(160),
   signature: z.string().trim().max(5_000),
-  aiProvider: z.enum(["MOCK", "DEEPSEEK"]),
+  aiProvider: z.enum(["MOCK", "GROQ"]),
   theme: z.enum(["DARK", "LIGHT", "SYSTEM"]),
   notifications: z.boolean(),
 });
@@ -19,7 +18,7 @@ function serializeSettings(
   settings: {
     company: string;
     signature: string;
-    aiProvider: "MOCK" | "DEEPSEEK";
+    aiProvider: "MOCK" | "GROQ";
     theme: "DARK" | "LIGHT" | "SYSTEM";
     notifications: boolean;
   },
@@ -53,16 +52,6 @@ export function createSettingsRouter(database: DatabaseClient) {
 
   router.put("/", async (request, response) => {
     const input = updateSettingsSchema.parse(request.body);
-    if (
-      input.aiProvider === "DEEPSEEK" &&
-      (!env.DEEPSEEK_API_KEY || env.AI_MONTHLY_REQUEST_LIMIT < 1)
-    ) {
-      throw new AppError(
-        409,
-        "AI_PROVIDER_NOT_CONFIGURED",
-        "DeepSeek requires an API key and an explicit monthly request budget.",
-      );
-    }
     const currentUser = await database.user.findUniqueOrThrow({ where: { id: request.user!.id } });
     if (input.email !== currentUser.email) {
       throw new AppError(

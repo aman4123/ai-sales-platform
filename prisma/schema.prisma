@@ -25,7 +25,7 @@ enum LeadStatus {
 
 enum AiProvider {
   MOCK
-  DEEPSEEK
+  GROQ
 }
 
 enum Theme {

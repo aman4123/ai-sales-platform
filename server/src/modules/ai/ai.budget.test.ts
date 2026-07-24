@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RedisClient } from "../../lib/redis.js";
-import { consumeMonthlyAiRequest } from "./ai.routes.js";
+import { consumeMonthlyAiRequest, resolveAiProvider } from "./ai.routes.js";
 
 function redisWithReplies(...replies: Array<number | string>) {
   const sendCommand = vi.fn();
@@ -20,10 +20,10 @@ describe("monthly paid-AI budget guard", () => {
 
     await consumeMonthlyAiRequest(redis, new Date("2026-07-24T00:00:00.000Z"));
 
-    expect(redis.sendCommand).toHaveBeenNthCalledWith(1, ["INCR", "budget:ai:deepseek:2026-07"]);
+    expect(redis.sendCommand).toHaveBeenNthCalledWith(1, ["INCR", "budget:ai:groq:2026-07"]);
     expect(redis.sendCommand).toHaveBeenNthCalledWith(
       2,
-      ["EXPIREAT", "budget:ai:deepseek:2026-07", String(Date.UTC(2026, 8, 1) / 1_000)],
+      ["EXPIREAT", "budget:ai:groq:2026-07", String(Date.UTC(2026, 8, 1) / 1_000)],
     );
   });
 
@@ -41,5 +41,14 @@ describe("monthly paid-AI budget guard", () => {
       statusCode: 503,
       code: "AI_BUDGET_NOT_CONFIGURED",
     });
+  });
+});
+
+describe("AI provider fallback", () => {
+  it("uses Groq only when it is selected and configured", () => {
+    expect(resolveAiProvider("GROQ", "configured-key")).toBe("GROQ");
+    expect(resolveAiProvider("GROQ", "")).toBe("MOCK");
+    expect(resolveAiProvider("GROQ", "   ")).toBe("MOCK");
+    expect(resolveAiProvider("MOCK", "configured-key")).toBe("MOCK");
   });
 });

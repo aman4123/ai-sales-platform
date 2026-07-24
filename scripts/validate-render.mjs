@@ -75,8 +75,12 @@ const applicationBaseUrl = freeService.envVars?.find(({ key }) => key === "APP_B
 if (applicationBaseUrl?.value !== "https://ai-sales-platform-free.onrender.com") {
   throw new Error("The Free web service must use its public Render URL for account email links.");
 }
-if (freeService.envVars?.some(({ key }) => key === "DEEPSEEK_API_KEY")) {
+if (freeService.envVars?.some(({ key }) => key === "GROQ_API_KEY")) {
   throw new Error("The zero-cost Blueprint must not activate a paid AI provider.");
+}
+const groqModel = freeService.envVars?.find(({ key }) => key === "GROQ_MODEL");
+if (groqModel?.value !== "openai/gpt-oss-120b") {
+  throw new Error("The Free web service must declare the supported default Groq model.");
 }
 const aiMonthlyLimit = freeService.envVars?.find(({ key }) => key === "AI_MONTHLY_REQUEST_LIMIT");
 if (Number(aiMonthlyLimit?.value) !== 0) {

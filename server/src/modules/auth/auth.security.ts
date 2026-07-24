@@ -67,7 +67,7 @@ export interface UserWithSettings {
   settings: {
     company: string;
     signature: string;
-    aiProvider: "MOCK" | "DEEPSEEK";
+    aiProvider: "MOCK" | "GROQ";
     theme: "DARK" | "LIGHT" | "SYSTEM";
     notifications: boolean;
   } | null;
