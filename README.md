@@ -20,20 +20,20 @@ The existing dark dashboard experience is preserved while its former local-only 
 
 ```text
 React + Vite UI
-      │ HTTPS /api
+      | HTTPS /api
 Express 5 + TypeScript
-      ├── JWT auth + refresh sessions + SMTP
-      ├── CRM / reports / settings
-      └── AI provider adapter
-              ├── Prisma 7 + PostgreSQL
-              └── Redis rate limits
+      |-- JWT auth + refresh sessions + transactional email
+      |-- CRM / reports / settings
+      `-- AI provider adapter
+              |-- Prisma 7 + PostgreSQL
+              `-- Redis rate limits and AI budget guard
 ```
 
 Express serves the compiled Vite app in production, so browser authentication stays same-origin. In development, Vite proxies `/api` to the server on port `4000`.
 
 ## Local development
 
-Requirements: Node.js 22.12–24, npm, PostgreSQL 17+, Redis 8+, and SMTP access (or Docker).
+Requirements: Node.js 22.12–24, npm, PostgreSQL 17+, Redis 8+, and Docker for the complete local stack.
 
 1. Install dependencies.
 
@@ -71,14 +71,15 @@ Mailpit's development inbox is available only on localhost at `http://localhost:
 
 All supported variables are documented in `.env.example`. Important production values are:
 
-- `DATABASE_URL`: PostgreSQL connection string
-- `REDIS_URL`: Redis connection string; mandatory in production
+- `DATABASE_URL`: pooled PostgreSQL connection string used by the running application
+- `DIRECT_URL`: optional direct PostgreSQL connection for migrations and backups; required for Neon production
+- `REDIS_URL`: Redis/Upstash connection string; mandatory in production and TLS-enforced for Upstash
 - `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET`: independent high-entropy secrets
 - `CORS_ORIGINS`: comma-separated additional browser origins; same-origin traffic is always accepted
 - `TRUST_PROXY`: set to `1` behind a single trusted reverse proxy such as Render
-- `APP_BASE_URL`, `EMAIL_FROM`, and `SMTP_*`: verified-account email delivery
+- `APP_BASE_URL`, `EMAIL_FROM`, and either `RESEND_API_KEY` or `SMTP_*`: verified-account email delivery
 - `METRICS_AUTH_TOKEN`: bearer credential for `/api/metrics`
-- `DEEPSEEK_API_KEY`: optional; required only when a user selects DeepSeek
+- `DEEPSEEK_API_KEY` and a positive `AI_MONTHLY_REQUEST_LIMIT`: optional and both required before a user can select DeepSeek
 - `SERVE_STATIC`: set to `true` when Express should serve the built frontend
 
 Never commit `.env` files. The repository ignores every `.env*` file except `.env.example`.
@@ -95,7 +96,7 @@ Never commit `.env` files. The repository ignores every `.env*` file except `.en
 | `npm run test:coverage` | Run all tests with enforced coverage floors |
 | `npm run test:e2e` | Run the account lifecycle in Chromium, Firefox, and WebKit |
 | `npm run api:lint` | Validate the OpenAPI 3.1 contract |
-| `npm run deploy:lint` | Validate `render.yaml` against Render's published schema |
+| `npm run deploy:lint` | Validate both Render Blueprints and enforce the zero-cost resource boundary |
 | `npm run prisma:validate` | Validate the Prisma schema |
 | `npm run db:migrate` | Create/apply a development migration |
 | `npm run db:deploy` | Apply committed migrations in CI/production |
@@ -136,16 +137,14 @@ The complete machine-readable contract is [`docs/openapi.yaml`](docs/openapi.yam
 
 ## Deployment
 
-`render.yaml` creates a Docker web service, private Render Key Value instance, and paid managed PostgreSQL database; generates authentication and metrics secrets; runs migrations in the pre-deploy phase; and checks `/api/health/ready`.
+The default [`render.yaml`](render.yaml) creates exactly one Render Free web service and uses external Neon Free PostgreSQL, Upstash Redis Free, and Resend Free. It intentionally creates no paid Render datastore, disk, worker, cron job, or paid service. Because Render Free does not support pre-deploy commands, its startup command applies committed Prisma migrations before starting the server. The original production-grade paid topology is preserved as [`render.production.yaml`](render.production.yaml) and must not be deployed under the ₹250/month budget.
 
-Before a production rollout:
+For the zero-cost early launch:
 
-1. Review the selected Render service/database plans and region.
-2. Supply the production `APP_BASE_URL`, SMTP sender/host/credentials, and optional `DEEPSEEK_API_KEY` when Render prompts for unsynced values.
-3. Connect `/api/metrics` and `ops/prometheus/alerts.yml` to a monitoring and paging platform.
-4. Deploy the Blueprint and register the first account through `/register`.
-5. Confirm readiness, authentication, CRM CRUD, and AI-provider behavior on the deployed URL.
-6. Run and record the initial point-in-time recovery or isolated logical restore drill.
+1. Follow [`docs/FREE_TIER_DEPLOYMENT.md`](docs/FREE_TIER_DEPLOYMENT.md) exactly and keep every provider on its named Free plan.
+2. Do not add payment methods; this makes provider quota exhaustion fail closed instead of producing usage charges.
+3. Enter Neon, Upstash, and Resend credentials directly in their respective dashboards—never in chat or GitHub.
+4. Deploy only after CI passes, then verify email lifecycle, CRM persistence, Redis rate limiting, and Mock AI from the public URL.
 
 GitHub Actions validates migrations, lint, types, tests, production builds, dependency security, and the Docker image on feature pushes and pull requests.
 

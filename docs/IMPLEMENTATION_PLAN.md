@@ -12,5 +12,6 @@ This plan records the production hardening work performed on `feature/production
 8. **Operationalize** — provide a non-root multi-stage Docker image, PostgreSQL Docker Compose stack, GitHub Actions CI, Render Blueprint, environment template, and deployment documentation.
 9. **Production-readiness hardening** — add cursor pagination and database-side analytics, least-privilege registrations, JWT issuer/audience validation, bounded AI responses, replay-safe refresh rotation, responsive accessible navigation, frontend error containment, secure Compose defaults, pinned CI actions, coverage gates, browser tests, and real PostgreSQL integration tests.
 10. **Account and scale hardening** — add email verification, reset and backup-code recovery, SMTP delivery, Redis-distributed rate limits, authenticated Prometheus metrics, alert rules, cross-browser E2E coverage, CodeQL/container scanning, API documentation, and tested backup/restore tooling.
+11. **Zero-cost launch path** — preserve the paid reference while adding a cost-guarded Render Free service, Neon pooled/direct TLS configuration, Upstash TLS Redis with production fail-closed behavior, Resend transactional email, an explicit monthly paid-AI guard, provider failure tests, and exact free-tier operations guidance.
 
-All implementation and production-readiness steps are complete on the feature branch.
+Steps 1–10 are merged. Step 11 is implemented on `feature/free-tier-deployment` and requires external free-account setup plus public smoke verification before completion.
