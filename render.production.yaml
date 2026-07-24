@@ -1,23 +1,20 @@
-# Zero-cost early-launch Blueprint. It intentionally creates only one Render Free web service.
+# Production-grade paid reference only. Do not deploy this Blueprint under the free-tier budget.
 services:
   - type: web
-    name: ai-sales-platform-free
+    name: ai-sales-platform
     runtime: docker
-    plan: free
-    branch: feature/free-tier-deployment
+    plan: starter
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: sh -c "node node_modules/prisma/build/index.js migrate deploy && node server/dist/index.js"
     healthCheckPath: /api/health/ready
     maxShutdownDelaySeconds: 30
+    preDeployCommand: node node_modules/prisma/build/index.js migrate deploy
     autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
         value: production
-      - key: HOST
-        value: 0.0.0.0
       - key: PORT
-        value: 10000
+        value: 4000
       - key: SERVE_STATIC
         value: "true"
       - key: TRUST_PROXY
@@ -25,23 +22,24 @@ services:
       - key: LOG_LEVEL
         value: info
       - key: DATABASE_URL
-        sync: false
-      - key: DIRECT_URL
-        sync: false
+        fromDatabase:
+          name: ai-sales-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ai-sales-redis
+          property: connectionString
       - key: DATABASE_POOL_MAX
-        value: 5
+        value: 10
       - key: DATABASE_POOL_IDLE_TIMEOUT_MS
         value: 30000
       - key: DATABASE_POOL_CONNECTION_TIMEOUT_MS
-        value: 10000
+        value: 5000
       - key: DATABASE_STATEMENT_TIMEOUT_MS
         value: 30000
-      - key: REDIS_URL
-        sync: false
       - key: REDIS_CONNECT_TIMEOUT_MS
         value: 5000
-      - key: REDIS_CONNECT_RETRIES
-        value: 5
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -59,13 +57,19 @@ services:
       - key: APP_BASE_URL
         sync: false
       - key: EMAIL_DELIVERY_MODE
-        value: resend
+        value: smtp
       - key: EMAIL_FROM
-        value: onboarding@resend.dev
-      - key: RESEND_API_KEY
         sync: false
-      - key: EMAIL_REQUEST_TIMEOUT_MS
-        value: 10000
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
       - key: EMAIL_VERIFICATION_TTL_MINUTES
         value: 1440
       - key: PASSWORD_RESET_TTL_MINUTES
@@ -85,16 +89,31 @@ services:
       - key: AI_RATE_LIMIT_WINDOW_MS
         value: 3600000
       - key: AI_RATE_LIMIT_MAX
-        value: 10
+        value: 20
       - key: AI_REQUEST_TIMEOUT_MS
-        value: 15000
+        value: 30000
       - key: AI_RESPONSE_MAX_BYTES
-        value: 131072
+        value: 262144
       - key: AI_MAX_TOKENS
-        value: 800
+        value: 1500
       - key: AI_MONTHLY_REQUEST_LIMIT
         value: 0
       - key: AI_HISTORY_RETENTION_DAYS
-        value: 30
+        value: 90
       - key: MAINTENANCE_INTERVAL_MS
         value: 21600000
+
+  - type: keyvalue
+    name: ai-sales-redis
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+    persistenceMode: off
+
+databases:
+  - name: ai-sales-postgres
+    plan: basic-256mb
+    databaseName: ai_sales
+    user: ai_sales
+    postgresMajorVersion: "17"
+    ipAllowList: []
