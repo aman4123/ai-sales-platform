@@ -57,11 +57,19 @@ if (
   !startupScript.includes('node node_modules/prisma/build/index.js "$@"') ||
   !startupScript.includes("prisma migrate deploy") ||
   !startupScript.includes("PRISMA_BASELINE_EXISTING_DATABASE") ||
+  !startupScript.includes("PRISMA_UPGRADE_LEGACY_MVP_SCHEMA") ||
+  !startupScript.includes("prisma db execute --file prisma/legacy/upgrade_mvp_schema.sql") ||
   !startupScript.includes("migrate diff") ||
   !startupScript.includes("migrate resolve --applied") ||
   !startupScript.includes("exec node server/dist/index.js")
 ) {
   throw new Error("The startup executable must safely baseline, apply migrations, and exec the API server.");
+}
+const legacyUpgrade = freeService.envVars?.find(
+  ({ key }) => key === "PRISMA_UPGRADE_LEGACY_MVP_SCHEMA",
+);
+if (legacyUpgrade?.value !== "true") {
+  throw new Error("The Free web service must enable the guarded legacy MVP schema upgrade.");
 }
 if (freeService.envVars?.some(({ key }) => key === "DEEPSEEK_API_KEY")) {
   throw new Error("The zero-cost Blueprint must not activate a paid AI provider.");

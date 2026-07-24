@@ -37,6 +37,8 @@ services:
         value: 30000
       - key: PRISMA_BASELINE_EXISTING_DATABASE
         value: "true"
+      - key: PRISMA_UPGRADE_LEGACY_MVP_SCHEMA
+        value: "true"
       - key: REDIS_URL
         sync: false
       - key: REDIS_CONNECT_TIMEOUT_MS
