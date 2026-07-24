@@ -9,9 +9,15 @@ interface AccountEmailInput {
   url: string;
 }
 
+interface AccountNoticeInput {
+  name: string;
+  to: string;
+}
+
 export interface EmailService {
   sendVerification(input: AccountEmailInput): Promise<void>;
   sendPasswordReset(input: AccountEmailInput): Promise<void>;
+  sendRecoveryNotice?(input: AccountNoticeInput): Promise<void>;
 }
 
 function escapeHtml(value: string) {
@@ -57,36 +63,54 @@ class AccountEmailService implements EmailService {
   }
 
   async sendVerification({ name, to, url }: AccountEmailInput) {
+    const body = messageBody(
+      name,
+      "Verify your email address",
+      url,
+      `${env.EMAIL_VERIFICATION_TTL_MINUTES} minutes`,
+    );
     await this.send({
       kind: "email_verification",
-      name,
       to,
-      url,
       subject: "Verify your AI Sales Platform email",
-      action: "Verify your email address",
-      lifetime: `${env.EMAIL_VERIFICATION_TTL_MINUTES} minutes`,
+      ...body,
     });
   }
 
   async sendPasswordReset({ name, to, url }: AccountEmailInput) {
+    const body = messageBody(
+      name,
+      "Reset your password",
+      url,
+      `${env.PASSWORD_RESET_TTL_MINUTES} minutes`,
+    );
     await this.send({
       kind: "password_reset",
-      name,
       to,
-      url,
       subject: "Reset your AI Sales Platform password",
-      action: "Reset your password",
-      lifetime: `${env.PASSWORD_RESET_TTL_MINUTES} minutes`,
+      ...body,
     });
   }
 
-  private async send(input: AccountEmailInput & {
+  async sendRecoveryNotice({ name, to }: AccountNoticeInput) {
+    const safeName = escapeHtml(name);
+    await this.send({
+      kind: "account_recovered",
+      to,
+      subject: "Your AI Sales Platform account was recovered",
+      text: `Hello ${name},\n\nYour password was changed using a recovery code and all active sessions were revoked. If you did not perform this recovery, contact support immediately.`,
+      html: `<p>Hello ${safeName},</p><p>Your password was changed using a recovery code and all active sessions were revoked.</p><p>If you did not perform this recovery, contact support immediately.</p>`,
+    });
+  }
+
+  private async send(input: {
     kind: string;
+    to: string;
     subject: string;
-    action: string;
-    lifetime: string;
+    text: string;
+    html: string;
   }) {
-    if (!this.transporter) {
+    if (env.EMAIL_DELIVERY_MODE === "log") {
       logger.info(
         { emailKind: input.kind, recipientHash: recipientHash(input.to) },
         "Development email accepted",
@@ -94,15 +118,47 @@ class AccountEmailService implements EmailService {
       return;
     }
 
-    const body = messageBody(input.name, input.action, input.url, input.lifetime);
-    await this.transporter.sendMail({
-      from: { name: "AI Sales Platform", address: env.EMAIL_FROM },
-      to: input.to,
-      subject: input.subject,
-      ...body,
-    });
+    if (env.EMAIL_DELIVERY_MODE === "resend") {
+      let response: Response;
+      try {
+        response = await fetch(`${env.RESEND_API_URL.replace(/\/$/, "")}/emails`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${env.RESEND_API_KEY}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            from: `AI Sales Platform <${env.EMAIL_FROM}>`,
+            to: [input.to],
+            subject: input.subject,
+            text: input.text,
+            html: input.html,
+            tags: [{ name: "category", value: input.kind }],
+          }),
+          signal: AbortSignal.timeout(env.EMAIL_REQUEST_TIMEOUT_MS),
+        });
+      } catch (error) {
+        throw new Error("Resend could not be reached.", { cause: error });
+      }
+      await response.body?.cancel();
+      if (!response.ok) {
+        throw new Error(`Resend rejected the email with HTTP ${response.status}.`);
+      }
+    } else {
+      await this.transporter!.sendMail({
+        from: { name: "AI Sales Platform", address: env.EMAIL_FROM },
+        to: input.to,
+        subject: input.subject,
+        text: input.text,
+        html: input.html,
+      });
+    }
     logger.info(
-      { emailKind: input.kind, recipientHash: recipientHash(input.to) },
+      {
+        emailKind: input.kind,
+        recipientHash: recipientHash(input.to),
+        provider: env.EMAIL_DELIVERY_MODE,
+      },
       "Transactional email delivered",
     );
   }

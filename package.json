@@ -103,6 +103,9 @@
     "vitest": "^4.1.10",
     "yaml": "^2.9.0"
   },
+  "overrides": {
+    "find-my-way": "9.7.0"
+  },
   "allowScripts": {
     "@prisma/engines@7.9.0": true,
     "esbuild@0.28.1": true,

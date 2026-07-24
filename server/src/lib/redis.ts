@@ -18,10 +18,45 @@ export function createRedisConnection(): RedisClient | null {
     url: env.REDIS_URL,
     socket: {
       connectTimeout: env.REDIS_CONNECT_TIMEOUT_MS,
-      reconnectStrategy: (retries) => Math.min(100 * 2 ** retries, 3_000),
+      reconnectStrategy: (retries) =>
+        retries >= env.REDIS_CONNECT_RETRIES ? false : Math.min(100 * 2 ** retries, 3_000),
     },
   });
   client.on("error", (error) => logger.error({ err: error }, "Redis client error"));
   client.on("reconnecting", () => logger.warn("Redis client reconnecting"));
   return client as unknown as RedisClient;
+}
+
+export async function connectRedisOrFallback(
+  client: RedisClient | null,
+  environment: "development" | "test" | "production" = env.NODE_ENV,
+) {
+  if (!client) {
+    if (environment === "production") {
+      throw new Error("Redis is required in production.");
+    }
+    logger.warn(
+      { dependency: "redis", rateLimitStore: "memory", environment },
+      "Redis is not configured; using process-local rate limiting outside production",
+    );
+    return null;
+  }
+
+  try {
+    await client.connect();
+    logger.info({ dependency: "redis", rateLimitStore: "redis" }, "Redis connection established");
+    return client;
+  } catch (error) {
+    if (environment === "production") throw error;
+    logger.warn(
+      {
+        err: error,
+        dependency: "redis",
+        rateLimitStore: "memory",
+        environment,
+      },
+      "Redis is unavailable; using process-local rate limiting outside production",
+    );
+    return null;
+  }
 }
