@@ -9,7 +9,6 @@ services:
     dockerContext: .
     dockerCommand: sh -c "node node_modules/prisma/build/index.js migrate deploy && node server/dist/index.js"
     healthCheckPath: /api/health/ready
-    maxShutdownDelaySeconds: 30
     autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
