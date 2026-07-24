@@ -67,6 +67,15 @@ describe("production environment validation", () => {
     });
   });
 
+  it("normalizes a Redis URL copied as an environment assignment", async () => {
+    const redisUrl = "rediss://default:secure-redis-password@free-cache.upstash.io:6379";
+    applyEnvironment({ REDIS_URL: `REDIS_URL="${redisUrl}"\n` });
+
+    const configuration = await import("./env.js");
+
+    expect(configuration.env.REDIS_URL).toBe(redisUrl);
+  });
+
   it("rejects insecure or incomplete free-tier provider configuration", async () => {
     applyEnvironment({
       DATABASE_URL:

@@ -16,6 +16,31 @@ const optionalPostgresUrl = z.preprocess(
   z.string().url().startsWith("postgresql://").optional(),
 );
 
+function unwrapCopiedEnvironmentAssignment(name: string, value: unknown) {
+  if (typeof value !== "string") return value;
+
+  let normalized = value.trim();
+  if (normalized.startsWith(`${name}=`)) {
+    normalized = normalized.slice(name.length + 1).trim();
+  }
+
+  const firstCharacter = normalized.at(0);
+  if (
+    normalized.length >= 2 &&
+    (firstCharacter === '"' || firstCharacter === "'") &&
+    normalized.at(-1) === firstCharacter
+  ) {
+    normalized = normalized.slice(1, -1);
+  }
+
+  return normalized;
+}
+
+const optionalRedisUrl = z.preprocess(
+  (value) => unwrapCopiedEnvironmentAssignment("REDIS_URL", value),
+  optionalUrl,
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
@@ -34,7 +59,7 @@ const envSchema = z.object({
   DATABASE_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   DATABASE_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(5_000),
   DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
-  REDIS_URL: optionalUrl,
+  REDIS_URL: optionalRedisUrl,
   REDIS_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(5_000),
   REDIS_CONNECT_RETRIES: z.coerce.number().int().min(0).max(20).default(5),
   JWT_ACCESS_SECRET: z.string().min(32),
