@@ -71,6 +71,10 @@ const legacyUpgrade = freeService.envVars?.find(
 if (legacyUpgrade?.value !== "true") {
   throw new Error("The Free web service must enable the guarded legacy MVP schema upgrade.");
 }
+const applicationBaseUrl = freeService.envVars?.find(({ key }) => key === "APP_BASE_URL");
+if (applicationBaseUrl?.value !== "https://ai-sales-platform-free.onrender.com") {
+  throw new Error("The Free web service must use its public Render URL for account email links.");
+}
 if (freeService.envVars?.some(({ key }) => key === "DEEPSEEK_API_KEY")) {
   throw new Error("The zero-cost Blueprint must not activate a paid AI provider.");
 }

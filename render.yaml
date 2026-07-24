@@ -60,7 +60,7 @@ services:
       - key: BCRYPT_ROUNDS
         value: 12
       - key: APP_BASE_URL
-        sync: false
+        value: https://ai-sales-platform-free.onrender.com
       - key: EMAIL_DELIVERY_MODE
         value: resend
       - key: EMAIL_FROM
