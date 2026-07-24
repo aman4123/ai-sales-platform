@@ -26,6 +26,7 @@ export const logger = pino({
       "accessToken",
       "refreshToken",
       "DEEPSEEK_API_KEY",
+      "RESEND_API_KEY",
       "SMTP_PASSWORD",
       "METRICS_AUTH_TOKEN",
       "verificationUrl",

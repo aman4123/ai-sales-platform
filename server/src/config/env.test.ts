@@ -45,4 +45,42 @@ describe("production environment validation", () => {
       /placeholder values|must be different/,
     );
   });
+
+  it("accepts TLS Neon, Upstash, and Resend free-tier configuration", async () => {
+    applyEnvironment({
+      DATABASE_URL:
+        "postgresql://app:secure-database-password@ep-example-pooler.us-east-1.aws.neon.tech/app?sslmode=require&channel_binding=require",
+      DIRECT_URL:
+        "postgresql://app:secure-database-password@ep-example.us-east-1.aws.neon.tech/app?sslmode=require&channel_binding=require",
+      REDIS_URL: "rediss://default:secure-redis-password@free-cache.upstash.io:6379",
+      EMAIL_DELIVERY_MODE: "resend",
+      EMAIL_FROM: "onboarding@resend.dev",
+      RESEND_API_KEY: "test-resend-api-key-with-safe-length",
+      SMTP_HOST: "",
+    });
+
+    await expect(import("./env.js")).resolves.toMatchObject({
+      env: {
+        EMAIL_DELIVERY_MODE: "resend",
+        HOST: "0.0.0.0",
+      },
+    });
+  });
+
+  it("rejects insecure or incomplete free-tier provider configuration", async () => {
+    applyEnvironment({
+      DATABASE_URL:
+        "postgresql://app:secure-database-password@ep-example-pooler.us-east-1.aws.neon.tech/app",
+      DIRECT_URL:
+        "postgresql://app:secure-database-password@ep-example-pooler.us-east-1.aws.neon.tech/app",
+      REDIS_URL: "redis://default:secure-redis-password@free-cache.upstash.io:6379",
+      EMAIL_DELIVERY_MODE: "resend",
+      RESEND_API_KEY: "",
+      SMTP_HOST: "",
+    });
+
+    await expect(import("./env.js")).rejects.toThrow(
+      /sslmode=require|unpooled|rediss:\/\/ TLS|RESEND_API_KEY/,
+    );
+  });
 });

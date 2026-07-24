@@ -102,7 +102,7 @@ export function createApp({ database, redis = null, emailService, serveStatic }:
   app.use("/api/leads", requireAuth, createLeadRouter(database));
   app.use("/api/settings", requireAuth, createSettingsRouter(database));
   app.use("/api/reports", requireAuth, createReportRouter(database));
-  app.use("/api/ai", requireAuth, rateLimiters.ai, createAiRouter(database));
+  app.use("/api/ai", requireAuth, rateLimiters.ai, createAiRouter(database, redis));
 
   app.use("/api", notFoundHandler);
 

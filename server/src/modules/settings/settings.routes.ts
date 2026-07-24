@@ -53,11 +53,14 @@ export function createSettingsRouter(database: DatabaseClient) {
 
   router.put("/", async (request, response) => {
     const input = updateSettingsSchema.parse(request.body);
-    if (input.aiProvider === "DEEPSEEK" && !env.DEEPSEEK_API_KEY) {
+    if (
+      input.aiProvider === "DEEPSEEK" &&
+      (!env.DEEPSEEK_API_KEY || env.AI_MONTHLY_REQUEST_LIMIT < 1)
+    ) {
       throw new AppError(
         409,
         "AI_PROVIDER_NOT_CONFIGURED",
-        "DeepSeek cannot be selected until its API key is configured.",
+        "DeepSeek requires an API key and an explicit monthly request budget.",
       );
     }
     const currentUser = await database.user.findUniqueOrThrow({ where: { id: request.user!.id } });

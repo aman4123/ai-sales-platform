@@ -2,10 +2,13 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-const databaseUrl = process.env.BACKUP_DATABASE_URL ?? process.env.DATABASE_URL;
+const databaseUrl =
+  process.env.BACKUP_DATABASE_URL ?? process.env.DIRECT_URL ?? process.env.DATABASE_URL;
 const outputDirectory = process.env.BACKUP_DIRECTORY;
 if (!databaseUrl || !outputDirectory) {
-  throw new Error("BACKUP_DATABASE_URL (or DATABASE_URL) and BACKUP_DIRECTORY are required.");
+  throw new Error(
+    "BACKUP_DATABASE_URL, DIRECT_URL, or DATABASE_URL plus BACKUP_DIRECTORY are required.",
+  );
 }
 
 const parsed = new URL(databaseUrl);

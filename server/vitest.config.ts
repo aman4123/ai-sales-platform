@@ -41,6 +41,7 @@ export default defineConfig({
       CORS_ORIGINS: "http://localhost:5173",
       SERVE_STATIC: "false",
       DEEPSEEK_API_KEY: "test-provider-key",
+      AI_MONTHLY_REQUEST_LIMIT: "2",
       METRICS_AUTH_TOKEN: "test-metrics-token-that-is-longer-than-thirty-two-characters",
     },
   },

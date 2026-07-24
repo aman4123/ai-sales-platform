@@ -11,8 +11,14 @@ const optionalUrl = z.preprocess(
   z.string().url().optional(),
 );
 
+const optionalPostgresUrl = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().url().startsWith("postgresql://").optional(),
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
@@ -23,12 +29,14 @@ const envSchema = z.object({
     .default("false")
     .transform((value) => value === "true"),
   DATABASE_URL: z.string().url().startsWith("postgresql://"),
+  DIRECT_URL: optionalPostgresUrl,
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   DATABASE_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   DATABASE_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(500).max(60_000).default(5_000),
   DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(30_000),
   REDIS_URL: optionalUrl,
   REDIS_CONNECT_TIMEOUT_MS: z.coerce.number().int().min(500).max(30_000).default(5_000),
+  REDIS_CONNECT_RETRIES: z.coerce.number().int().min(0).max(20).default(5),
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ISSUER: z.string().min(1).default("ai-sales-platform"),
@@ -42,8 +50,11 @@ const envSchema = z.object({
     .default(604_800),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
   APP_BASE_URL: z.string().url().default("http://localhost:5173"),
-  EMAIL_DELIVERY_MODE: z.enum(["log", "smtp"]).default("log"),
+  EMAIL_DELIVERY_MODE: z.enum(["log", "smtp", "resend"]).default("log"),
   EMAIL_FROM: z.string().email().default("no-reply@localhost"),
+  EMAIL_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(10_000),
+  RESEND_API_KEY: optionalSecret,
+  RESEND_API_URL: z.string().url().default("https://api.resend.com"),
   SMTP_HOST: optionalSecret,
   SMTP_PORT: z.coerce.number().int().min(1).max(65_535).default(1_025),
   SMTP_SECURE: z
@@ -68,6 +79,7 @@ const envSchema = z.object({
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   AI_RESPONSE_MAX_BYTES: z.coerce.number().int().min(1_024).max(1_048_576).default(262_144),
   AI_MAX_TOKENS: z.coerce.number().int().min(64).max(8_192).default(1_500),
+  AI_MONTHLY_REQUEST_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(0),
   AI_HISTORY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(90),
   MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(60_000).max(86_400_000).default(21_600_000),
 }).superRefine((configuration, context) => {
@@ -119,11 +131,11 @@ const envSchema = z.object({
       });
     }
 
-    if (configuration.EMAIL_DELIVERY_MODE !== "smtp" || !configuration.SMTP_HOST) {
+    if (configuration.EMAIL_DELIVERY_MODE === "log") {
       context.addIssue({
         code: "custom",
-        path: ["SMTP_HOST"],
-        message: "Production requires SMTP email delivery.",
+        path: ["EMAIL_DELIVERY_MODE"],
+        message: "Production requires SMTP or Resend email delivery.",
       });
     }
 
@@ -145,12 +157,63 @@ const envSchema = z.object({
   }
 
   if (configuration.REDIS_URL) {
-    const redisProtocol = new URL(configuration.REDIS_URL).protocol;
+    const redisUrl = new URL(configuration.REDIS_URL);
+    const redisProtocol = redisUrl.protocol;
     if (redisProtocol !== "redis:" && redisProtocol !== "rediss:") {
       context.addIssue({
         code: "custom",
         path: ["REDIS_URL"],
         message: "Redis URLs must use redis:// or rediss://.",
+      });
+    }
+    if (
+      configuration.NODE_ENV === "production" &&
+      redisUrl.hostname.endsWith(".upstash.io") &&
+      redisProtocol !== "rediss:"
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["REDIS_URL"],
+        message: "Production Upstash connections must use rediss:// TLS.",
+      });
+    }
+  }
+
+  const databaseUrl = new URL(configuration.DATABASE_URL);
+  if (databaseUrl.hostname.endsWith(".neon.tech")) {
+    if (!["require", "verify-full"].includes(databaseUrl.searchParams.get("sslmode") ?? "")) {
+      context.addIssue({
+        code: "custom",
+        path: ["DATABASE_URL"],
+        message: "Neon connections must require TLS with sslmode=require.",
+      });
+    }
+    if (configuration.NODE_ENV === "production" && !configuration.DIRECT_URL) {
+      context.addIssue({
+        code: "custom",
+        path: ["DIRECT_URL"],
+        message: "Production Neon deployments require a direct URL for migrations and backups.",
+      });
+    }
+  }
+
+  if (configuration.DIRECT_URL) {
+    const directUrl = new URL(configuration.DIRECT_URL);
+    if (
+      directUrl.hostname.endsWith(".neon.tech") &&
+      !["require", "verify-full"].includes(directUrl.searchParams.get("sslmode") ?? "")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["DIRECT_URL"],
+        message: "The direct Neon connection must require TLS with sslmode=require.",
+      });
+    }
+    if (directUrl.hostname.includes("-pooler.")) {
+      context.addIssue({
+        code: "custom",
+        path: ["DIRECT_URL"],
+        message: "DIRECT_URL must use Neon's unpooled hostname.",
       });
     }
   }
@@ -160,6 +223,25 @@ const envSchema = z.object({
       code: "custom",
       path: ["SMTP_PASSWORD"],
       message: "SMTP_USER and SMTP_PASSWORD must be configured together.",
+    });
+  }
+
+  if (configuration.EMAIL_DELIVERY_MODE === "smtp" && !configuration.SMTP_HOST) {
+    context.addIssue({
+      code: "custom",
+      path: ["SMTP_HOST"],
+      message: "SMTP delivery requires SMTP_HOST.",
+    });
+  }
+
+  if (
+    configuration.EMAIL_DELIVERY_MODE === "resend" &&
+    (!configuration.RESEND_API_KEY || configuration.RESEND_API_KEY.length < 20)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["RESEND_API_KEY"],
+      message: "Resend delivery requires a valid RESEND_API_KEY.",
     });
   }
 
@@ -186,6 +268,17 @@ const envSchema = z.object({
       code: "custom",
       path: ["DEEPSEEK_API_URL"],
       message: "The production AI provider URL must use HTTPS.",
+    });
+  }
+
+  if (
+    configuration.NODE_ENV === "production" &&
+    new URL(configuration.RESEND_API_URL).protocol !== "https:"
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["RESEND_API_URL"],
+      message: "The production Resend API URL must use HTTPS.",
     });
   }
 });

@@ -13,6 +13,7 @@ RUN apk add --no-cache dumb-init postgresql17-client
 WORKDIR /app
 
 ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
     PORT=4000 \
     SERVE_STATIC=true
 
