@@ -7,7 +7,7 @@ services:
     branch: feature/free-tier-deployment
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    dockerCommand: sh -c "node node_modules/prisma/build/index.js migrate deploy && node server/dist/index.js"
+    dockerCommand: "/bin/sh -c 'node node_modules/prisma/build/index.js migrate deploy && exec node server/dist/index.js'"
     healthCheckPath: /api/health/ready
     autoDeployTrigger: checksPass
     envVars:
