@@ -54,10 +54,14 @@ if (freeService.dockerCommand !== "/usr/local/bin/ai-sales-start") {
 }
 const startupScript = await readFile("docker-entrypoint.sh", "utf8");
 if (
-  !startupScript.includes("node node_modules/prisma/build/index.js migrate deploy") ||
+  !startupScript.includes('node node_modules/prisma/build/index.js "$@"') ||
+  !startupScript.includes("prisma migrate deploy") ||
+  !startupScript.includes("PRISMA_BASELINE_EXISTING_DATABASE") ||
+  !startupScript.includes("migrate diff") ||
+  !startupScript.includes("migrate resolve --applied") ||
   !startupScript.includes("exec node server/dist/index.js")
 ) {
-  throw new Error("The startup executable must apply migrations and exec the API server.");
+  throw new Error("The startup executable must safely baseline, apply migrations, and exec the API server.");
 }
 if (freeService.envVars?.some(({ key }) => key === "DEEPSEEK_API_KEY")) {
   throw new Error("The zero-cost Blueprint must not activate a paid AI provider.");
