@@ -2,10 +2,12 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 
-const deepSeekResponseSchema = z.object({
+const GROQ_CHAT_COMPLETIONS_URL = env.TEST_GROQ_API_URL ?? "https://api.groq.com/openai/v1/chat/completions";
+
+const groqResponseSchema = z.object({
   choices: z.array(
     z.object({
-      message: z.object({ content: z.string().min(1) }),
+      message: z.object({ content: z.string().trim().min(1) }),
     }),
   ).min(1),
 });
@@ -96,31 +98,35 @@ Would you be open to a 15-minute conversation next week to see whether this coul
 Best regards${input.signature ? `,\n${input.signature}` : ""}`;
 }
 
-export async function askDeepSeek(systemPrompt: string, userPrompt: string): Promise<string> {
-  if (!env.DEEPSEEK_API_KEY) {
+export async function askGroq(
+  systemPrompt: string,
+  userPrompt: string,
+  options: { temperature?: number } = {},
+): Promise<string> {
+  if (!env.GROQ_API_KEY) {
     throw new AppError(
       503,
       "AI_PROVIDER_NOT_CONFIGURED",
-      "DeepSeek is selected but DEEPSEEK_API_KEY is not configured.",
+      "Groq is selected but GROQ_API_KEY is not configured.",
     );
   }
 
   let result: Response;
   try {
-    result = await fetch(`${env.DEEPSEEK_API_URL.replace(/\/$/, "")}/chat/completions`, {
+    result = await fetch(GROQ_CHAT_COMPLETIONS_URL, {
       method: "POST",
       headers: {
-        authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+        authorization: `Bearer ${env.GROQ_API_KEY}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: env.DEEPSEEK_MODEL,
+        model: env.GROQ_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.4,
-        max_tokens: env.AI_MAX_TOKENS,
+        temperature: options.temperature ?? 0.4,
+        max_completion_tokens: env.AI_MAX_TOKENS,
         stream: false,
       }),
       signal: AbortSignal.timeout(env.AI_REQUEST_TIMEOUT_MS),
@@ -137,7 +143,7 @@ export async function askDeepSeek(systemPrompt: string, userPrompt: string): Pro
     throw new AppError(502, "AI_PROVIDER_ERROR", "The AI provider rejected the request.");
   }
 
-  const payload = deepSeekResponseSchema.safeParse(await readProviderPayload(result));
+  const payload = groqResponseSchema.safeParse(await readProviderPayload(result));
   if (!payload.success) {
     throw new AppError(502, "AI_PROVIDER_RESPONSE_INVALID", "The AI provider response was invalid.");
   }

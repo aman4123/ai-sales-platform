@@ -9,6 +9,10 @@ describe("data retention", () => {
       refreshSession: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
       accountToken: { deleteMany: vi.fn().mockResolvedValue({ count: 3 }) },
       aiRequest: { deleteMany: vi.fn().mockResolvedValue({ count: 4 }) },
+      userSettings: { findMany: vi.fn().mockResolvedValue([{ userId: "user-1", dataRetentionDays: 90 }]) },
+      researchJob: { deleteMany: vi.fn().mockResolvedValue({ count: 5 }) },
+      deliveryEvent: { deleteMany: vi.fn().mockResolvedValue({ count: 6 }) },
+      reply: { updateMany: vi.fn().mockResolvedValue({ count: 7 }) },
     };
     const database = {
       $transaction: vi.fn((operation) => operation(transaction)),
@@ -18,6 +22,9 @@ describe("data retention", () => {
       sessions: 2,
       accountTokens: 3,
       aiRequests: 4,
+      researchJobs: 5,
+      deliveryEvents: 6,
+      replyPreviewsCleared: 7,
     });
     expect(transaction.$queryRaw).toHaveBeenCalledOnce();
   });
@@ -28,6 +35,7 @@ describe("data retention", () => {
       refreshSession: { deleteMany: vi.fn() },
       accountToken: { deleteMany: vi.fn() },
       aiRequest: { deleteMany: vi.fn() },
+      userSettings: { findMany: vi.fn() },
     };
     const database = {
       $transaction: vi.fn((operation) => operation(transaction)),

@@ -40,7 +40,7 @@ describe.runIf(runDatabaseTests)("PostgreSQL API integration", () => {
       firstEmail,
       "integration-password-123",
     );
-    expect(firstRegistration.body.data.user.role).toBe("MEMBER");
+    expect(firstRegistration.body.data.user.role).toBe("USER");
     const firstAccessToken = firstRegistration.body.data.accessToken as string;
     const firstCookie = firstRegistration.headers["set-cookie"]?.[0] as string;
     const recoveryCode = firstRegistration.body.data.recoveryCodes[0] as string;
@@ -130,6 +130,9 @@ describe.runIf(runDatabaseTests)("PostgreSQL API integration", () => {
       sessions: expect.any(Number),
       accountTokens: expect.any(Number),
       aiRequests: expect.any(Number),
+      researchJobs: expect.any(Number),
+      deliveryEvents: expect.any(Number),
+      replyPreviewsCleared: expect.any(Number),
     });
   });
 });

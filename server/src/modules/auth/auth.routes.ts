@@ -398,6 +398,14 @@ export function createAuthRouter(
       { userId: user.id, requestId: request.id, ...sessionMetadata(request) },
       "Account recovered with a backup code",
     );
+    try {
+      await emailService.sendRecoveryNotice?.({ name: user.name, to: user.email });
+    } catch (error) {
+      logger.error(
+        { err: error, userId: user.id, requestId: request.id },
+        "Account recovery notice failed",
+      );
+    }
     response.clearCookie(REFRESH_COOKIE, clearCookieOptions);
     response.status(204).send();
   });

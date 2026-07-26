@@ -12,6 +12,129 @@ datasource db {
 enum UserRole {
   ADMIN
   MEMBER
+  USER
+  SUPER_ADMIN
+}
+
+enum ResearchTargetType {
+  COMPANY
+  MARKET
+  CONTACT
+}
+
+enum ResearchJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum VerificationStatus {
+  VERIFIED
+  PARTIALLY_VERIFIED
+  UNVERIFIED
+  CONFLICTING
+  NOT_PUBLICLY_AVAILABLE
+}
+
+enum SourceType {
+  OFFICIAL_WEBSITE
+  GOVERNMENT_REGISTRY
+  COMPANY_PROFILE
+  NEWS
+  BUSINESS_DIRECTORY
+  SOCIAL_PROFILE
+  USER_PROVIDED
+  OTHER
+}
+
+enum SearchProviderType {
+  TAVILY
+  BRAVE
+  SERPER
+}
+
+enum DealStage {
+  QUALIFYING
+  DISCOVERY
+  PROPOSAL
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum CampaignStatus {
+  DRAFT
+  RESEARCHING
+  READY_FOR_REVIEW
+  APPROVED
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum CampaignRecipientStatus {
+  PENDING
+  APPROVED
+  QUEUED
+  SENT
+  DELIVERED
+  BOUNCED
+  REPLIED
+  OPTED_OUT
+  FAILED
+  CANCELLED
+}
+
+enum CampaignMessageStatus {
+  DRAFT
+  APPROVED
+  QUEUED
+  SENT
+  DELIVERED
+  BOUNCED
+  FAILED
+  CANCELLED
+}
+
+enum CampaignMessageKind {
+  INITIAL
+  FOLLOW_UP_1
+  FOLLOW_UP_2
+  FINAL_FOLLOW_UP
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskType {
+  HUMAN_RESPONSE_REQUIRED
+  REVIEW_RESEARCH
+  REVIEW_CAMPAIGN
+  DATA_CONFLICT
+  GENERAL
+}
+
+enum GoalStatus {
+  DRAFT
+  CONFIRMED
+  ARCHIVED
+}
+
+enum DeliveryEventType {
+  DELIVERED
+  BOUNCED
+  COMPLAINT
+  UNSUBSCRIBED
+  REPLIED
 }
 
 enum LeadStatus {
@@ -25,7 +148,7 @@ enum LeadStatus {
 
 enum AiProvider {
   MOCK
-  DEEPSEEK
+  GROQ
 }
 
 enum Theme {
@@ -51,13 +174,31 @@ model User {
   passwordHash      String
   passwordChangedAt DateTime?
   name              String
-  role              UserRole         @default(MEMBER)
+  role              UserRole         @default(USER)
   leads             Lead[]
   settings          UserSettings?
   sessions          RefreshSession[]
   aiRequests        AiRequest[]
   accountTokens     AccountToken[]
   recoveryCodes     RecoveryCode[]
+  companies         Company[]
+  contacts          Contact[]
+  deals             Deal[]
+  crmActivities     CrmActivity[]
+  researchJobs      ResearchJob[]
+  researchResults   CompanyResearchResult[]
+  idealProfiles     IdealCustomerProfile[]
+  salesGoals        SalesGoal[]
+  campaigns         Campaign[]
+  campaignMessages  CampaignMessage[]
+  campaignApprovals CampaignApproval[]       @relation("CampaignApprover")
+  replies           Reply[]
+  deliveryEvents    DeliveryEvent[]
+  optOuts           OptOut[]
+  tasks             Task[]
+  notes             Note[]
+  auditLogs         AuditLog[]                @relation("AuditActor")
+  searchUsage       SearchUsage[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 }
@@ -112,13 +253,28 @@ model Lead {
   status    LeadStatus @default(INTERESTED)
   value     Decimal    @default(0) @db.Decimal(15, 2)
   notes     String?
+  companyRecordId String?
+  contactRecordId String?
+  score           Int        @default(0)
+  scoreReasons    Json?
+  evidenceQuality Float      @default(0)
+  confidence      Float      @default(0)
+  riskFlags       String[]   @default([])
+  lastResearchedAt DateTime?
   userId    String
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyRecord Company? @relation(fields: [companyRecordId], references: [id], onDelete: SetNull)
+  contactRecord Contact? @relation(fields: [contactRecordId], references: [id], onDelete: SetNull)
+  campaignRecipients CampaignRecipient[]
+  crmNotes          Note[]
 
   @@index([userId, createdAt, id])
   @@index([userId, status])
+  @@index([userId, score])
+  @@index([companyRecordId])
+  @@index([contactRecordId])
   @@index([company(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_company_trgm_idx")
   @@index([contact(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_contact_trgm_idx")
   @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_email_trgm_idx")
@@ -133,9 +289,496 @@ model UserSettings {
   aiProvider    AiProvider @default(MOCK)
   theme         Theme      @default(DARK)
   notifications Boolean    @default(true)
+  organization   String     @default("")
+  timezone       String     @default("UTC")
+  language       String     @default("en")
+  dataRetentionDays Int     @default(90)
+  campaignDailyLimit Int    @default(25)
+  unsubscribeFooter String  @default("")
+  senderName       String     @default("")
+  senderEmail      String     @default("")
+  notificationPreferences Json @default("{}")
+  campaignDefaults Json       @default("{}")
+  privacyMode      String     @default("STANDARD")
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
   user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model IdealCustomerProfile {
+  id                 String     @id @default(cuid())
+  userId             String
+  name               String
+  productService     String
+  targetIndustry     String
+  geography          String
+  companySize        String?
+  painPoints         String[]   @default([])
+  preferredBuyerRole String?
+  exclusions         String[]   @default([])
+  campaignGoal       String
+  summary            String
+  fitCriteria        Json
+  exclusionCriteria  Json
+  searchQueries      String[]   @default([])
+  scoringModel       Json
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+  user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaigns          Campaign[]
+
+  @@index([userId, createdAt])
+  @@index([userId, deletedAt])
+}
+
+model SalesGoal {
+  id           String     @id @default(cuid())
+  userId       String
+  statement    String
+  objective    String
+  targetMarket Json
+  plan         Json
+  status       GoalStatus @default(DRAFT)
+  confirmedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, createdAt])
+}
+
+model Company {
+  id                      String     @id @default(cuid())
+  userId                  String
+  name                    String
+  legalName               String?
+  aliases                 String[]   @default([])
+  website                 String?
+  domain                  String?
+  industry                String?
+  description             String?
+  headquarters            String?
+  operatingLocations      String[]   @default([])
+  publicPhone             String?
+  publicEmail             String?
+  socialProfiles          Json?
+  registrationIdentifiers Json?
+  productsServices        String[]   @default([])
+  confidenceScore         Float      @default(0)
+  riskFlags               String[]   @default([])
+  staleAt                 DateTime?
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
+  deletedAt               DateTime?
+  user                    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts                Contact[]
+  leads                   Lead[]
+  deals                   Deal[]
+  activities              CrmActivity[]
+  researchResults         CompanyResearchResult[]
+  campaignRecipients      CampaignRecipient[]
+  notes                   Note[]
+
+  @@unique([userId, domain])
+  @@index([userId, name])
+  @@index([userId, deletedAt])
+}
+
+model Contact {
+  id                     String             @id @default(cuid())
+  userId                 String
+  companyId              String?
+  name                   String
+  jobTitle               String?
+  publicEmail            String?
+  publicPhone            String?
+  linkedInUrl            String?
+  publicSourceUrl        String?
+  verificationStatus     VerificationStatus @default(UNVERIFIED)
+  optedOutAt             DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  deletedAt              DateTime?
+  user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company                Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  leads                  Lead[]
+  deals                  Deal[]
+  activities             CrmActivity[]
+  campaignRecipients     CampaignRecipient[]
+  notes                  Note[]
+
+  @@unique([userId, publicEmail])
+  @@index([userId, name])
+  @@index([companyId])
+  @@index([userId, deletedAt])
+}
+
+model Deal {
+  id          String     @id @default(cuid())
+  userId      String
+  companyId   String?
+  contactId   String?
+  name        String
+  stage       DealStage  @default(QUALIFYING)
+  value       Decimal    @default(0) @db.Decimal(15, 2)
+  currency    String     @default("USD")
+  expectedAt  DateTime?
+  closedAt    DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact     Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  activities  CrmActivity[]
+  notes       Note[]
+
+  @@index([userId, stage])
+  @@index([companyId])
+  @@index([contactId])
+}
+
+model CrmActivity {
+  id          String    @id @default(cuid())
+  userId      String
+  companyId   String?
+  contactId   String?
+  dealId      String?
+  type        String
+  summary     String
+  metadata    Json?
+  occurredAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact     Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  deal        Deal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  @@index([userId, occurredAt])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([dealId])
+}
+
+model Note {
+  id        String    @id @default(cuid())
+  userId    String
+  leadId    String?
+  companyId String?
+  contactId String?
+  dealId    String?
+  body      String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([leadId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([dealId])
+}
+
+model ResearchJob {
+  id          String             @id @default(cuid())
+  userId      String
+  query       String
+  targetType  ResearchTargetType
+  status      ResearchJobStatus  @default(PENDING)
+  provider    SearchProviderType?
+  errorCode   String?
+  error       String?
+  attemptCount Int                @default(0)
+  maxAttempts  Int                @default(3)
+  timeoutAt    DateTime?
+  cancelRequestedAt DateTime?
+  createdAt   DateTime           @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  results     CompanyResearchResult[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+}
+
+model CompanyResearchResult {
+  id                      String       @id @default(cuid())
+  userId                  String
+  jobId                   String
+  companyId               String?
+  companyName             String?
+  legalName               String?
+  aliases                 String[]     @default([])
+  website                 String?
+  domain                  String?
+  industry                String?
+  description             String?
+  headquarters            String?
+  operatingLocations      String[]     @default([])
+  publicPhone             String?
+  publicEmail             String?
+  socialProfiles          Json?
+  registrationIdentifiers Json?
+  productsServices        String[]     @default([])
+  unknownFields           String[]     @default([])
+  confidenceScore         Float        @default(0)
+  riskFlags               String[]     @default([])
+  salesAnalysis           Json?
+  staleAt                 DateTime?
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
+  user                    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job                     ResearchJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  company                 Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  evidence                EvidenceItem[]
+
+  @@index([userId, createdAt])
+  @@index([jobId])
+  @@index([companyId])
+  @@index([userId, domain])
+}
+
+model EvidenceItem {
+  id                 String             @id @default(cuid())
+  researchResultId   String
+  field              String
+  value              String
+  sourceUrl          String
+  sourceTitle        String
+  sourceType         SourceType
+  retrievedAt        DateTime
+  confidence         Float
+  verificationStatus VerificationStatus
+  quotedSnippet      String?
+  isPrimarySource    Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  researchResult     CompanyResearchResult @relation(fields: [researchResultId], references: [id], onDelete: Cascade)
+
+  @@index([researchResultId, field])
+  @@index([sourceUrl])
+}
+
+model SearchUsage {
+  id        String             @id @default(cuid())
+  userId    String
+  provider  SearchProviderType
+  month     String
+  count     Int                @default(0)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, month])
+  @@index([provider, month])
+}
+
+model Campaign {
+  id                    String          @id @default(cuid())
+  userId                String
+  idealCustomerProfileId String?
+  name                  String
+  salesGoal             String
+  productService        String
+  valueProposition      String
+  audienceFilters       Json
+  senderIdentity        Json
+  emailTemplate         Json?
+  sequenceConfig        Json
+  schedule              Json
+  dailySendingLimit     Int             @default(25)
+  status                CampaignStatus  @default(DRAFT)
+  contentVersion        Int             @default(1)
+  approvedVersion       Int?
+  pausedAt              DateTime?
+  launchedAt            DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  deletedAt             DateTime?
+  user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  idealCustomerProfile  IdealCustomerProfile? @relation(fields: [idealCustomerProfileId], references: [id], onDelete: SetNull)
+  recipients            CampaignRecipient[]
+  messages              CampaignMessage[]
+  approvals             CampaignApproval[]
+  tasks                 Task[]
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([idealCustomerProfileId])
+}
+
+model CampaignRecipient {
+  id          String                  @id @default(cuid())
+  campaignId  String
+  leadId      String?
+  companyId   String?
+  contactId   String?
+  status      CampaignRecipientStatus @default(PENDING)
+  stopReason  String?
+  repliedAt   DateTime?
+  optedOutAt  DateTime?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  campaign    Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  lead        Lead?                   @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  company     Company?                @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact     Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  messages    CampaignMessage[]
+  replies     Reply[]
+
+  @@unique([campaignId, leadId])
+  @@unique([campaignId, contactId])
+  @@index([campaignId, status])
+  @@index([companyId])
+}
+
+model CampaignMessage {
+  id                String                @id @default(cuid())
+  userId            String
+  campaignId        String
+  recipientId       String
+  kind              CampaignMessageKind
+  sequenceStep      Int
+  subject           String
+  greeting          String
+  body              String
+  cta               String
+  closing           String
+  signature         String
+  factsUsed         Json
+  evidenceIds       String[]              @default([])
+  promptVersion     String
+  contentVersion    Int
+  status            CampaignMessageStatus @default(DRAFT)
+  scheduledAt       DateTime?
+  queuedAt          DateTime?
+  sentAt            DateTime?
+  providerMessageId String?
+  idempotencyKey    String                @unique
+  failureReason     String?
+  attemptCount      Int                   @default(0)
+  maxAttempts       Int                   @default(3)
+  lastAttemptAt     DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign          Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  recipient         CampaignRecipient     @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  replies           Reply[]
+  deliveryEvents    DeliveryEvent[]
+
+  @@unique([recipientId, sequenceStep, contentVersion])
+  @@index([userId, status, scheduledAt])
+  @@index([campaignId, status])
+}
+
+model CampaignApproval {
+  id               String   @id @default(cuid())
+  campaignId       String
+  approvedById     String
+  approvalType     String
+  contentVersion   Int
+  recipientCount   Int
+  messageSnapshot  Json
+  sequenceSnapshot Json
+  limitsSnapshot   Json
+  createdAt        DateTime @default(now())
+  campaign         Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  approvedBy       User     @relation("CampaignApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([campaignId, contentVersion])
+  @@index([approvedById, createdAt])
+}
+
+model Reply {
+  id              String             @id @default(cuid())
+  userId          String
+  recipientId     String
+  messageId       String?
+  providerReplyId String?
+  classification  String?
+  contentPreview  String?
+  requiresHuman   Boolean            @default(true)
+  receivedAt      DateTime
+  createdAt       DateTime           @default(now())
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recipient       CampaignRecipient  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  message         CampaignMessage?   @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, providerReplyId])
+  @@index([recipientId, receivedAt])
+  @@index([userId, requiresHuman])
+}
+
+model DeliveryEvent {
+  id              String            @id @default(cuid())
+  userId          String
+  messageId       String
+  provider        String
+  providerEventId String
+  type            DeliveryEventType
+  occurredAt      DateTime
+  createdAt       DateTime          @default(now())
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message         CampaignMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerEventId])
+  @@index([messageId, occurredAt])
+  @@index([userId, type, createdAt])
+}
+
+model OptOut {
+  id        String   @id @default(cuid())
+  userId    String
+  emailHash String
+  reason    String?
+  source    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, emailHash])
+  @@index([userId, createdAt])
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  userId      String
+  campaignId  String?
+  type        TaskType
+  status      TaskStatus @default(OPEN)
+  title       String
+  description String?
+  dueAt       DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign    Campaign?  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, createdAt])
+  @@index([campaignId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  resourceType String
+  resourceId  String?
+  metadata    Json?
+  requestId   String?
+  createdAt   DateTime @default(now())
+  actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId, createdAt])
+  @@index([resourceType, resourceId])
 }
 
 model AiRequest {

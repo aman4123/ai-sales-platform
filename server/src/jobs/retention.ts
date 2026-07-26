@@ -13,15 +13,40 @@ export async function runRetention(database: DatabaseClient) {
     `;
     if (!lock?.acquired) return null;
 
-    const [sessions, accountTokens, aiRequests] = await Promise.all([
+    const [sessions, accountTokens, aiRequests, settings] = await Promise.all([
       transaction.refreshSession.deleteMany({ where: { expiresAt: { lt: now } } }),
       transaction.accountToken.deleteMany({ where: { expiresAt: { lt: now } } }),
       transaction.aiRequest.deleteMany({ where: { createdAt: { lt: aiCutoff } } }),
+      transaction.userSettings.findMany({
+        select: { userId: true, dataRetentionDays: true },
+        orderBy: { userId: "asc" },
+        take: 1_000,
+      }),
     ]);
+    let researchJobs = 0;
+    let deliveryEvents = 0;
+    let replyPreviewsCleared = 0;
+    for (const setting of settings) {
+      const cutoff = new Date(now.getTime() - setting.dataRetentionDays * 86_400_000);
+      const [research, delivery, replies] = await Promise.all([
+        transaction.researchJob.deleteMany({ where: { userId: setting.userId, createdAt: { lt: cutoff } } }),
+        transaction.deliveryEvent.deleteMany({ where: { userId: setting.userId, createdAt: { lt: cutoff } } }),
+        transaction.reply.updateMany({
+          where: { userId: setting.userId, receivedAt: { lt: cutoff }, contentPreview: { not: null } },
+          data: { contentPreview: null },
+        }),
+      ]);
+      researchJobs += research.count;
+      deliveryEvents += delivery.count;
+      replyPreviewsCleared += replies.count;
+    }
     return {
       sessions: sessions.count,
       accountTokens: accountTokens.count,
       aiRequests: aiRequests.count,
+      researchJobs,
+      deliveryEvents,
+      replyPreviewsCleared,
     };
   });
 }

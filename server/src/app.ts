@@ -12,15 +12,23 @@ import { logger, safeRequestPath } from "./lib/logger.js";
 import { createMetrics } from "./lib/metrics.js";
 import type { DatabaseClient } from "./lib/prisma.js";
 import type { RedisClient } from "./lib/redis.js";
-import { requireAuth } from "./middleware/auth.js";
+import { requireAdmin, requireAuth } from "./middleware/auth.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { createRateLimiters, requestId } from "./middleware/request-security.js";
 import { createAiRouter, createDemoAiRouter } from "./modules/ai/ai.routes.js";
+import { createAdminRouter } from "./modules/admin/admin.routes.js";
 import { createAuthRouter } from "./modules/auth/auth.routes.js";
+import { createCampaignRouter } from "./modules/campaigns/campaign.routes.js";
+import { createCommandRouter } from "./modules/command/command.routes.js";
+import { createCrmRouter } from "./modules/crm/crm.routes.js";
 import { createHealthRouter } from "./modules/health/health.routes.js";
+import { createIcpRouter } from "./modules/icp/icp.routes.js";
 import { createLeadRouter } from "./modules/leads/lead.routes.js";
+import { createOperationsRouter } from "./modules/operations/operations.routes.js";
 import { createReportRouter } from "./modules/reports/report.routes.js";
+import { createResearchRouter } from "./modules/research/research.routes.js";
 import { createSettingsRouter } from "./modules/settings/settings.routes.js";
+import { createEmailWebhookRouter } from "./modules/webhooks/email-webhook.routes.js";
 
 interface AppOptions {
   database: DatabaseClient;
@@ -92,17 +100,38 @@ export function createApp({ database, redis = null, emailService, serveStatic }:
       callback(new AppError(403, "ORIGIN_NOT_ALLOWED", "This request origin is not allowed."));
     }),
   );
-  app.use(express.json({ limit: "100kb" }));
+  app.use(express.json({
+    limit: "100kb",
+    verify: (incomingRequest, _response, body) => {
+      const request = incomingRequest as express.Request;
+      if (request.originalUrl.startsWith("/api/webhooks/email/")) {
+        request.rawBody = Buffer.from(body);
+      }
+    },
+  }));
 
   app.get("/api/metrics", metrics.endpoint);
   app.use("/api", rateLimiters.api);
   app.use("/api/health", createHealthRouter(database, redis));
   app.use("/api/auth", createAuthRouter(database, accountEmail, rateLimiters));
+  app.use("/api/webhooks/email", createEmailWebhookRouter(database));
   app.use("/api/ai/demo", rateLimiters.ai, createDemoAiRouter());
   app.use("/api/leads", requireAuth, createLeadRouter(database));
+  app.use("/api/crm", requireAuth, createCrmRouter(database));
+  app.use("/api/command", requireAuth, createCommandRouter(database));
+  app.use("/api/operations", requireAuth, createOperationsRouter(database));
   app.use("/api/settings", requireAuth, createSettingsRouter(database));
   app.use("/api/reports", requireAuth, createReportRouter(database));
-  app.use("/api/ai", requireAuth, rateLimiters.ai, createAiRouter(database));
+  app.use("/api/icps", requireAuth, createIcpRouter(database));
+  app.use(
+    "/api/campaigns",
+    requireAuth,
+    rateLimiters.ai,
+    createCampaignRouter(database, redis, accountEmail),
+  );
+  app.use("/api/research", requireAuth, rateLimiters.ai, createResearchRouter(database, redis));
+  app.use("/api/ai", requireAuth, rateLimiters.ai, createAiRouter(database, redis));
+  app.use("/api/admin", requireAuth, requireAdmin, createAdminRouter(database));
 
   app.use("/api", notFoundHandler);
 

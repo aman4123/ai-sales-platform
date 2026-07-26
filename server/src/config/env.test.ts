@@ -7,7 +7,6 @@ const productionEnvironment = {
   JWT_ACCESS_SECRET: "independent-access-secret-1234567890",
   JWT_REFRESH_SECRET: "independent-refresh-secret-0987654321",
   CORS_ORIGINS: "",
-  DEEPSEEK_API_URL: "https://api.deepseek.com",
   APP_BASE_URL: "https://sales.example.com",
   EMAIL_DELIVERY_MODE: "smtp",
   EMAIL_FROM: "no-reply@sales.example.com",
@@ -43,6 +42,83 @@ describe("production environment validation", () => {
 
     await expect(import("./env.js")).rejects.toThrow(
       /placeholder values|must be different/,
+    );
+  });
+
+  it("accepts TLS Neon, Upstash, and Resend free-tier configuration", async () => {
+    applyEnvironment({
+      DATABASE_URL:
+        "postgresql://app:secure-database-password@ep-example-pooler.us-east-1.aws.neon.tech/app?sslmode=require&channel_binding=require",
+      DIRECT_URL:
+        "postgresql://app:secure-database-password@ep-example.us-east-1.aws.neon.tech/app?sslmode=require&channel_binding=require",
+      REDIS_URL: "rediss://default:secure-redis-password@free-cache.upstash.io:6379",
+      EMAIL_DELIVERY_MODE: "resend",
+      EMAIL_FROM: "onboarding@resend.dev",
+      RESEND_API_KEY: "test-resend-api-key-with-safe-length",
+      SMTP_HOST: "",
+    });
+
+    await expect(import("./env.js")).resolves.toMatchObject({
+      env: {
+        EMAIL_DELIVERY_MODE: "resend",
+        HOST: "0.0.0.0",
+      },
+    });
+  });
+
+  it("accepts optional Groq configuration without exposing it to the client", async () => {
+    applyEnvironment({
+      GROQ_API_KEY: "test-groq-api-key-with-safe-length",
+      GROQ_MODEL: "openai/gpt-oss-120b",
+    });
+
+    const configuration = await import("./env.js");
+
+    expect(configuration.env).toMatchObject({
+      GROQ_API_KEY: "test-groq-api-key-with-safe-length",
+      GROQ_MODEL: "openai/gpt-oss-120b",
+    });
+  });
+
+  it("rejects deterministic provider overrides outside the test environment", async () => {
+    applyEnvironment({ TEST_EMAIL_FAILURE_SUBJECT: "Simulated provider failure" });
+
+    await expect(import("./env.js")).rejects.toThrow(/permitted only in the test environment/);
+  });
+
+  it("requires a strong webhook signing secret before live delivery can start", async () => {
+    applyEnvironment({
+      OUTBOUND_EMAIL_ENABLED: "true",
+      OUTBOUND_DELIVERY_MODE: "live",
+      EMAIL_WEBHOOK_SECRET: "short",
+    });
+
+    await expect(import("./env.js")).rejects.toThrow(/webhook signing secret/);
+  });
+
+  it("normalizes a Redis URL copied as an environment assignment", async () => {
+    const redisUrl = "rediss://default:secure-redis-password@free-cache.upstash.io:6379";
+    applyEnvironment({ REDIS_URL: `REDIS_URL="${redisUrl}"\n` });
+
+    const configuration = await import("./env.js");
+
+    expect(configuration.env.REDIS_URL).toBe(redisUrl);
+  });
+
+  it("rejects insecure or incomplete free-tier provider configuration", async () => {
+    applyEnvironment({
+      DATABASE_URL:
+        "postgresql://app:secure-database-password@ep-example-pooler.us-east-1.aws.neon.tech/app",
+      DIRECT_URL:
+        "postgresql://app:secure-database-password@ep-example-pooler.us-east-1.aws.neon.tech/app",
+      REDIS_URL: "redis://default:secure-redis-password@free-cache.upstash.io:6379",
+      EMAIL_DELIVERY_MODE: "resend",
+      RESEND_API_KEY: "",
+      SMTP_HOST: "",
+    });
+
+    await expect(import("./env.js")).rejects.toThrow(
+      /sslmode=require|unpooled|rediss:\/\/ TLS|RESEND_API_KEY/,
     );
   });
 });

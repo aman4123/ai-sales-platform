@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import AuthShell from "../components/auth/AuthShell";
 import { api, apiErrorMessage } from "../services/api";
 

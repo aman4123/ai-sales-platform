@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "../../contexts/auth-context";
 import Layout from "./Layout";
@@ -71,7 +71,7 @@ describe("application layout", () => {
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
     expect(navigation).not.toHaveAttribute("inert");
     expect(document.body.style.overflow).toBe("hidden");
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
     expect(screen.getAllByRole("button", { name: "Close navigation" })).not.toHaveLength(0);
     expect(document.activeElement).toHaveAccessibleName("Close navigation");
     await user.tab({ shift: true });

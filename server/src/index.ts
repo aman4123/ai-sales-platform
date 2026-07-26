@@ -3,10 +3,10 @@ import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
-import { createRedisConnection } from "./lib/redis.js";
+import { connectRedisOrFallback, createRedisConnection } from "./lib/redis.js";
 import { startRetentionJob } from "./jobs/retention.js";
 
-const redis = createRedisConnection();
+const configuredRedis = createRedisConnection();
 let server: Server | null = null;
 let isShuttingDown = false;
 let stopRetentionJob: (() => void) | null = null;
@@ -14,7 +14,7 @@ let stopRetentionJob: (() => void) | null = null;
 async function disconnectDependencies() {
   await Promise.all([
     prisma.$disconnect(),
-    redis?.isOpen ? redis.quit() : Promise.resolve(),
+    configuredRedis?.isOpen ? configuredRedis.quit() : Promise.resolve(),
   ]);
 }
 
@@ -64,13 +64,16 @@ process.on("uncaughtException", (error) => {
 
 try {
   await prisma.$connect();
-  if (redis) await redis.connect();
+  const activeRedis = await connectRedisOrFallback(configuredRedis);
 
-  const app = createApp({ database: prisma, redis });
+  const app = createApp({ database: prisma, redis: activeRedis });
   stopRetentionJob = startRetentionJob(prisma);
   server = createServer(app);
-  server.listen(env.PORT, () => {
-    logger.info({ port: env.PORT, environment: env.NODE_ENV }, "AI Sales API is listening");
+  server.listen(env.PORT, env.HOST, () => {
+    logger.info(
+      { host: env.HOST, port: env.PORT, environment: env.NODE_ENV },
+      "AI Sales API is listening",
+    );
   });
 } catch (error) {
   logger.fatal({ err: error }, "Failed to start AI Sales API");

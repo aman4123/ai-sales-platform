@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "../contexts/auth-context";
 import { api, apiErrorMessage } from "../services/api";
@@ -45,7 +45,7 @@ export default function Profile() {
         <div className="mt-10 grid gap-6 md:grid-cols-2">
           <div className="rounded-lg bg-slate-800 p-5"><p className="text-slate-400">Company</p><h3 className="mt-2 text-xl">{settings.company || "Not Set"}</h3></div>
           <div className="rounded-lg bg-slate-800 p-5"><p className="text-slate-400">Business Email</p><h3 className="mt-2 text-xl">{user!.email}</h3></div>
-          <div className="rounded-lg bg-slate-800 p-5"><p className="text-slate-400">AI Provider</p><h3 className="mt-2 text-xl">{settings.aiProvider === "DEEPSEEK" ? "DeepSeek" : "Mock AI"}</h3></div>
+          <div className="rounded-lg bg-slate-800 p-5"><p className="text-slate-400">AI Provider</p><h3 className="mt-2 text-xl">{settings.aiProvider === "GROQ" ? "Groq" : "Mock AI"}</h3></div>
           <div className="rounded-lg bg-slate-800 p-5"><p className="text-slate-400">Theme</p><h3 className="mt-2 text-xl">{settings.theme[0] + settings.theme.slice(1).toLowerCase()}</h3></div>
           <div className="rounded-lg bg-slate-800 p-5 md:col-span-2"><p className="text-slate-400">Notifications</p><h3 className="mt-2 text-xl">{settings.notifications ? "Enabled" : "Disabled"}</h3></div>
         </div>

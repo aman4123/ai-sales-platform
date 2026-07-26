@@ -547,12 +547,17 @@ describe("production API", () => {
         email: user.email,
         company: "Updated Co",
         signature: "Regards",
-        aiProvider: "MOCK",
+        aiProvider: "GROQ",
         theme: "SYSTEM",
         notifications: false,
       });
     expect(updateResponse.status).toBe(200);
-    expect(mock.userSettings.upsert).toHaveBeenCalledOnce();
+    expect(mock.userSettings.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ aiProvider: "GROQ" }),
+        update: expect.objectContaining({ aiProvider: "GROQ" }),
+      }),
+    );
   });
 
   it("keeps the landing AI demo public but validated", async () => {

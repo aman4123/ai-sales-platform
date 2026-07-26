@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=22.12.0 <25"
+    "node": ">=22.22.0 <25"
   },
   "scripts": {
     "dev": "concurrently -k -n client,api -c blue,green \"npm:dev:client\" \"npm:dev:server\"",
@@ -22,7 +22,14 @@
     "test:coverage:server": "vitest run --coverage --config server/vitest.config.ts",
     "test:coverage:client": "vitest run --coverage --config client.vitest.config.ts",
     "test:watch": "vitest --config server/vitest.config.ts",
-    "test:e2e": "playwright test",
+    "test:e2e:prepare": "node scripts/prepare-e2e-database.mjs",
+    "test:e2e": "npm run test:e2e:core && npm run test:e2e:failures",
+    "test:e2e:core": "node scripts/run-e2e.mjs core",
+    "test:e2e:failures": "node scripts/run-e2e.mjs failures",
+    "test:db:clean": "node scripts/verify-clean-migration.mjs",
+    "test:db:upgrade": "node scripts/verify-v1-upgrade.mjs",
+    "test:db": "npm run test:db:clean && npm run test:db:upgrade",
+    "test:live-integrations": "node scripts/live-integration-smoke.mjs",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "db:migrate": "prisma migrate dev",
@@ -30,6 +37,7 @@
     "db:studio": "prisma studio",
     "db:backup": "node scripts/database-backup.mjs",
     "db:restore": "node scripts/database-restore.mjs",
+    "admin:assign-initial": "node server/dist/admin-cli.js",
     "api:lint": "redocly lint docs/openapi.yaml",
     "deploy:lint": "node scripts/validate-render.mjs",
     "preview": "vite preview",
@@ -59,7 +67,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-hot-toast": "^2.6.0",
-    "react-router-dom": "^7.18.1",
+    "react-router": "8.3.0",
     "recharts": "^3.10.0",
     "redis": "^6.1.0",
     "zod": "^4.4.3"
@@ -102,6 +110,11 @@
     "vite": "^8.1.1",
     "vitest": "^4.1.10",
     "yaml": "^2.9.0"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.8",
+    "find-my-way": "9.7.0",
+    "valibot": "1.4.2"
   },
   "allowScripts": {
     "@prisma/engines@7.9.0": true,

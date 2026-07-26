@@ -7,13 +7,13 @@ import { UnauthorizedError } from "../../lib/errors.js";
 export interface AuthenticatedUser {
   id: string;
   email: string;
-  role: "ADMIN" | "MEMBER";
+  role: "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
 }
 
 const accessPayloadSchema = z.object({
   sub: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(["ADMIN", "MEMBER"]),
+  role: z.enum(["ADMIN", "MEMBER", "USER", "SUPER_ADMIN"]),
   type: z.literal("access"),
 });
 

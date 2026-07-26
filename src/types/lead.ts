@@ -8,6 +8,12 @@ export interface Lead {
   status: LeadStatus;
   value: string;
   notes: string | null;
+  score?: number | null;
+  scoreReasons?: string[];
+  evidenceQuality?: number | null;
+  confidence?: number | null;
+  riskFlags?: string[];
+  lastResearchedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

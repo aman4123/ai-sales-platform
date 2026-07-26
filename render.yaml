@@ -1,19 +1,22 @@
+# Zero-cost early-launch Blueprint. It intentionally creates only one Render Free web service.
 services:
   - type: web
-    name: ai-sales-platform
+    name: ai-sales-platform-free
     runtime: docker
-    plan: starter
+    plan: free
+    branch: feature/free-tier-deployment
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    dockerCommand: /usr/local/bin/ai-sales-start
     healthCheckPath: /api/health/ready
-    maxShutdownDelaySeconds: 30
-    preDeployCommand: node node_modules/prisma/build/index.js migrate deploy
     autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
         value: production
+      - key: HOST
+        value: 0.0.0.0
       - key: PORT
-        value: 4000
+        value: 10000
       - key: SERVE_STATIC
         value: "true"
       - key: TRUST_PROXY
@@ -21,24 +24,27 @@ services:
       - key: LOG_LEVEL
         value: info
       - key: DATABASE_URL
-        fromDatabase:
-          name: ai-sales-postgres
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: ai-sales-redis
-          property: connectionString
+        sync: false
+      - key: DIRECT_URL
+        sync: false
       - key: DATABASE_POOL_MAX
-        value: 10
+        value: 5
       - key: DATABASE_POOL_IDLE_TIMEOUT_MS
         value: 30000
       - key: DATABASE_POOL_CONNECTION_TIMEOUT_MS
-        value: 5000
+        value: 10000
       - key: DATABASE_STATEMENT_TIMEOUT_MS
         value: 30000
+      - key: PRISMA_BASELINE_EXISTING_DATABASE
+        value: "true"
+      - key: PRISMA_UPGRADE_LEGACY_MVP_SCHEMA
+        value: "true"
+      - key: REDIS_URL
+        sync: false
       - key: REDIS_CONNECT_TIMEOUT_MS
         value: 5000
+      - key: REDIS_CONNECT_RETRIES
+        value: 5
       - key: JWT_ACCESS_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -54,21 +60,15 @@ services:
       - key: BCRYPT_ROUNDS
         value: 12
       - key: APP_BASE_URL
-        sync: false
+        value: https://ai-sales-platform-free.onrender.com
       - key: EMAIL_DELIVERY_MODE
-        value: smtp
+        value: resend
       - key: EMAIL_FROM
+        value: onboarding@resend.dev
+      - key: RESEND_API_KEY
         sync: false
-      - key: SMTP_HOST
-        sync: false
-      - key: SMTP_PORT
-        value: 587
-      - key: SMTP_SECURE
-        value: "false"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASSWORD
-        sync: false
+      - key: EMAIL_REQUEST_TIMEOUT_MS
+        value: 10000
       - key: EMAIL_VERIFICATION_TTL_MINUTES
         value: 1440
       - key: PASSWORD_RESET_TTL_MINUTES
@@ -88,29 +88,54 @@ services:
       - key: AI_RATE_LIMIT_WINDOW_MS
         value: 3600000
       - key: AI_RATE_LIMIT_MAX
-        value: 20
+        value: 10
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: AI_REQUEST_TIMEOUT_MS
-        value: 30000
+        value: 15000
       - key: AI_RESPONSE_MAX_BYTES
-        value: 262144
+        value: 131072
       - key: AI_MAX_TOKENS
-        value: 1500
+        value: 800
+      - key: AI_MONTHLY_REQUEST_LIMIT
+        value: 0
       - key: AI_HISTORY_RETENTION_DAYS
-        value: 90
+        value: 30
+      - key: SEARCH_ENABLED
+        value: "false"
+      - key: SEARCH_PROVIDER
+        value: TAVILY
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: SEARCH_MONTHLY_REQUEST_LIMIT
+        value: 0
+      - key: SEARCH_RESULT_LIMIT
+        value: 5
+      - key: SEARCH_REQUEST_TIMEOUT_MS
+        value: 10000
+      - key: SEARCH_RESPONSE_MAX_BYTES
+        value: 262144
+      - key: SEARCH_CACHE_TTL_SECONDS
+        value: 3600
+      - key: SEARCH_MAX_RETRIES
+        value: 2
+      - key: OUTBOUND_EMAIL_ENABLED
+        value: "false"
+      - key: OUTBOUND_DELIVERY_MODE
+        value: disabled
+      - key: OUTBOUND_TEST_RECIPIENT
+        sync: false
+      - key: OUTBOUND_DAILY_LIMIT
+        value: 25
+      - key: OUTBOUND_FOLLOW_UP_LIMIT
+        value: 2
+      - key: EMAIL_WEBHOOK_SECRET
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
       - key: MAINTENANCE_INTERVAL_MS
         value: 21600000
-
-  - type: keyvalue
-    name: ai-sales-redis
-    plan: starter
-    ipAllowList: []
-    maxmemoryPolicy: allkeys-lru
-    persistenceMode: off
-
-databases:
-  - name: ai-sales-postgres
-    plan: basic-256mb
-    databaseName: ai_sales
-    user: ai_sales
-    postgresMajorVersion: "17"
-    ipAllowList: []
