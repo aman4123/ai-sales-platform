@@ -1,6 +1,6 @@
 import { Bell, Menu, Search, UserCircle } from "lucide-react";
 import { useState, type FormEvent, type RefObject } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { useAuth } from "../../contexts/auth-context";
 
 export default function Navbar({
@@ -72,7 +72,7 @@ export default function Navbar({
           <div className="hidden text-left sm:block">
             <p className="font-semibold">{user?.name ?? "Account"}</p>
             <p className="text-sm text-slate-400">
-              {user?.role === "ADMIN" ? "Admin" : "Member"}
+              {user?.role === "SUPER_ADMIN" ? "Super admin" : user?.role === "ADMIN" ? "Admin" : "User"}
             </p>
           </div>
         </button>

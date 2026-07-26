@@ -101,5 +101,41 @@ services:
         value: 0
       - key: AI_HISTORY_RETENTION_DAYS
         value: 30
+      - key: SEARCH_ENABLED
+        value: "false"
+      - key: SEARCH_PROVIDER
+        value: TAVILY
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: SEARCH_MONTHLY_REQUEST_LIMIT
+        value: 0
+      - key: SEARCH_RESULT_LIMIT
+        value: 5
+      - key: SEARCH_REQUEST_TIMEOUT_MS
+        value: 10000
+      - key: SEARCH_RESPONSE_MAX_BYTES
+        value: 262144
+      - key: SEARCH_CACHE_TTL_SECONDS
+        value: 3600
+      - key: SEARCH_MAX_RETRIES
+        value: 2
+      - key: OUTBOUND_EMAIL_ENABLED
+        value: "false"
+      - key: OUTBOUND_DELIVERY_MODE
+        value: disabled
+      - key: OUTBOUND_TEST_RECIPIENT
+        sync: false
+      - key: OUTBOUND_DAILY_LIMIT
+        value: 25
+      - key: OUTBOUND_FOLLOW_UP_LIMIT
+        value: 2
+      - key: EMAIL_WEBHOOK_SECRET
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
       - key: MAINTENANCE_INTERVAL_MS
         value: 21600000

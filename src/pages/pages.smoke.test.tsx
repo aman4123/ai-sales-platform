@@ -1,13 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import toast from "react-hot-toast";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "../contexts/auth-context";
 import { generateEmailWithAI, researchWithAI, askDemoAI } from "../services/ai";
 import { api } from "../services/api";
 import { getLeadPage } from "../services/leadStorage";
 import { getReports } from "../services/reports";
+import { createResearchJob, getResearchStatus } from "../services/v2";
 import type { AuthUser } from "../types/api";
 import Dashboard from "./Dashboard";
 import Email from "./Email";
@@ -29,8 +30,13 @@ vi.mock("../services/ai", () => ({
 }));
 vi.mock("../services/leadStorage", () => ({ getLeadPage: vi.fn() }));
 vi.mock("../services/reports", () => ({ getReports: vi.fn() }));
+vi.mock("../services/v2", () => ({
+  createResearchJob: vi.fn(),
+  getResearchStatus: vi.fn(),
+  saveResearchCompany: vi.fn(),
+}));
 vi.mock("../services/api", () => ({
-  api: { put: vi.fn() },
+  api: { delete: vi.fn(), get: vi.fn(), put: vi.fn() },
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
 }));
 vi.mock("react-hot-toast", () => ({
@@ -69,7 +75,11 @@ const mockedGetReports = vi.mocked(getReports);
 const mockedAskDemo = vi.mocked(askDemoAI);
 const mockedResearch = vi.mocked(researchWithAI);
 const mockedEmail = vi.mocked(generateEmailWithAI);
+const mockedResearchStatus = vi.mocked(getResearchStatus);
+const mockedCreateResearchJob = vi.mocked(createResearchJob);
 const mockedPut = vi.mocked(api.put);
+const mockedGet = vi.mocked(api.get);
+const mockedDelete = vi.mocked(api.delete);
 
 function withRouter(component: React.ReactNode) {
   return render(<MemoryRouter>{component}</MemoryRouter>);
@@ -112,6 +122,53 @@ describe("primary application pages", () => {
     mockedAskDemo.mockResolvedValue("Demo result");
     mockedResearch.mockResolvedValue("Research result");
     mockedEmail.mockResolvedValue("Generated email");
+    mockedResearchStatus.mockResolvedValue({
+      enabled: true,
+      configured: true,
+      provider: "TAVILY",
+      message: "Verified search is configured.",
+    });
+    mockedCreateResearchJob.mockResolvedValue({
+      cached: false,
+      job: {
+        id: "job-1",
+        query: "Research Acme",
+        targetType: "COMPANY",
+        status: "COMPLETED",
+        provider: "TAVILY",
+        error: null,
+        createdAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        results: [{
+          id: "result-1",
+          companyName: "Acme",
+          legalName: null,
+          website: "https://acme.example",
+          domain: "acme.example",
+          industry: "Logistics",
+          description: "Public logistics provider",
+          headquarters: null,
+          publicPhone: null,
+          publicEmail: null,
+          unknownFields: ["legalName", "headquarters", "publicPhone", "publicEmail"],
+          confidenceScore: 72,
+          riskFlags: ["REQUIRES_CONFIRMATION"],
+          salesAnalysis: { label: "AI analysis", statements: [{ statement: "Possible fit based on the verified industry.", type: "INFERENCE", evidenceIds: ["ev-1"] }], rejectedUnsupportedFacts: 1 },
+          staleAt: new Date().toISOString(),
+          evidence: [{ id: "ev-1", field: "companyName", value: "Acme", sourceUrl: "https://acme.example", sourceTitle: "Acme official site", sourceType: "OFFICIAL_WEBSITE", retrievedAt: new Date().toISOString(), confidence: 0.9, verificationStatus: "VERIFIED", quotedSnippet: "Acme", isPrimarySource: true }],
+        }],
+      },
+    });
+    mockedGet.mockResolvedValue({
+      data: {
+        data: {
+          providerStatus: {
+            research: { enabled: false, configured: false, provider: "TAVILY", message: "Not configured" },
+            email: { configured: false, provider: "log", outboundEnabled: false },
+          },
+        },
+      },
+    });
     mockedPut.mockResolvedValue({
       data: { data: { settings: { ...authUser.settings, userId: authUser.id, name: authUser.name, email: authUser.email } } },
     });
@@ -132,12 +189,11 @@ describe("primary application pages", () => {
     });
   });
 
-  it("submits the public AI demo as an accessible form", async () => {
-    const user = userEvent.setup();
+  it("renders honest landing calls to action and evidence safeguards", () => {
     withRouter(<Landing />);
-    await user.type(screen.getByLabelText("Ask the AI sales demo"), "Research Acme");
-    await user.click(screen.getByRole("button", { name: "Ask AI" }));
-    expect(await screen.findByText("Demo result")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Start Free/ }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /See How It Works/ })).toHaveAttribute("href", "#workflow");
+    expect(screen.getByText(/No evidence means the field remains unknown/i)).toBeInTheDocument();
   });
 
   it("generates an email from labeled inputs", async () => {
@@ -153,9 +209,26 @@ describe("primary application pages", () => {
   it("runs authenticated research and announces the result", async () => {
     const user = userEvent.setup();
     withRouter(<Research />);
-    await user.type(screen.getByLabelText("Research request"), "Research Acme");
-    await user.click(screen.getByRole("button", { name: /Research$/ }));
-    expect(await screen.findByText("Research result")).toBeInTheDocument();
+    await screen.findByText("TAVILY configured");
+    await user.type(screen.getByLabelText("What market or company should be researched?"), "Research Acme");
+    await user.click(screen.getByLabelText(/I confirm this paid search request/i));
+    await user.click(screen.getByRole("button", { name: "Start verified research" }));
+    expect(await screen.findByText("COMPLETED")).toBeInTheDocument();
+    expect(screen.getByText("Possible fit based on the verified industry.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute("href", "https://acme.example");
+    expect(mockedCreateResearchJob).toHaveBeenCalledWith({ query: "Research Acme", targetType: "COMPANY" });
+  });
+
+  it("shows the exact disabled state instead of fabricated research", async () => {
+    mockedResearchStatus.mockResolvedValueOnce({
+      enabled: false,
+      configured: false,
+      provider: "TAVILY",
+      message: "Live search is not configured. Verified company research is unavailable.",
+    });
+    withRouter(<Research />);
+    expect(await screen.findByText("Live search is not configured. Verified company research is unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start verified research" })).toBeDisabled();
   });
 
   it("renders accessible chart summaries", async () => {
@@ -172,12 +245,23 @@ describe("primary application pages", () => {
     expect(screen.getByRole("option", { name: "Groq" })).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Company"));
     await user.type(screen.getByLabelText("Company"), "Updated Co");
-    await user.selectOptions(screen.getByLabelText("AI Provider"), "GROQ");
-    await user.click(screen.getByRole("button", { name: /Save Settings/ }));
+    await user.selectOptions(screen.getByLabelText("AI provider"), "GROQ");
+    await user.click(screen.getByRole("button", { name: /Save settings/ }));
     expect(mockedPut).toHaveBeenCalledWith(
       "/settings",
       expect.objectContaining({ company: "Updated Co", aiProvider: "GROQ" }),
     );
+  });
+
+  it("requires exact confirmation before account deletion", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValueOnce(true);
+    mockedDelete.mockResolvedValueOnce({ data: undefined, status: 204, statusText: "No Content", headers: {}, config: {} as never });
+    withRouter(<Settings />);
+    await user.type(screen.getByLabelText("Type your account email"), authUser.email);
+    await user.click(screen.getByLabelText("I understand this deletion is permanent."));
+    await user.click(screen.getByRole("button", { name: "Permanently delete account" }));
+    expect(mockedDelete).toHaveBeenCalledWith("/settings/account", { data: { confirm: "DELETE", email: authUser.email } });
   });
 
   it("renders profile and not-found recovery states", () => {

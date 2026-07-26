@@ -75,21 +75,56 @@ jobs:
       - run: npm audit --audit-level=high
       - run: docker compose config --quiet
 
-  e2e:
+  database:
     runs-on: ubuntu-latest
     needs: quality
-    timeout-minutes: 20
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
         env:
-          POSTGRES_DB: ai_sales_e2e
+          POSTGRES_DB: postgres
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d ai_sales_e2e"
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUN_DATABASE_TESTS: "true"
+      CLEAN_MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_clean_test?schema=public
+      UPGRADE_MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_upgrade_test?schema=public
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run test:db
+      - run: npx vitest run --config server/vitest.config.ts server/src/migration.safety.test.ts
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [quality, database]
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -102,10 +137,16 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      mailpit:
+        image: axllent/mailpit:v1.27@sha256:e22dce5b36f93c77082e204a3942fb6b283b7896e057458400a4c88344c3df68
+        ports:
+          - 51025:1025
+          - 58025:8025
     env:
       CI: "true"
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_e2e?schema=public
-      REDIS_URL: redis://localhost:6379
+      E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_e2e_test?schema=public
+      E2E_REDIS_URL: redis://localhost:6379/15
+      E2E_FAILURE_REDIS_URL: redis://localhost:6379/14
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -114,7 +155,6 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run prisma:generate
-      - run: npm run db:deploy
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:e2e
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -126,7 +166,7 @@ jobs:
 
   container:
     runs-on: ubuntu-latest
-    needs: quality
+    needs: [quality, database]
     timeout-minutes: 15
     services:
       postgres:
@@ -153,6 +193,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_container?schema=public
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ai_sales_container?schema=public
       REDIS_URL: redis://localhost:6379
       JWT_ACCESS_SECRET: container-access-secret-that-is-longer-than-thirty-two-characters
       JWT_REFRESH_SECRET: container-refresh-secret-that-is-longer-than-thirty-two-characters
@@ -161,15 +202,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - run: docker build --tag ai-sales-platform:ci .
       - name: Apply migrations with the production image
-        run: docker run --rm --network host -e DATABASE_URL -e REDIS_URL -e JWT_ACCESS_SECRET -e JWT_REFRESH_SECRET -e METRICS_AUTH_TOKEN -e NODE_ENV=test ai-sales-platform:ci node node_modules/prisma/build/index.js migrate deploy
+        run: docker run --rm --network host -e DATABASE_URL -e DIRECT_URL -e REDIS_URL -e JWT_ACCESS_SECRET -e JWT_REFRESH_SECRET -e METRICS_AUTH_TOKEN -e NODE_ENV=test ai-sales-platform:ci node node_modules/prisma/build/index.js migrate deploy
       - name: Smoke test the production image
         run: |
           docker run --detach --name ai-sales-platform-ci --network host \
             -e NODE_ENV=production -e PORT=4000 -e SERVE_STATIC=true -e TRUST_PROXY=0 \
-            -e DATABASE_URL -e REDIS_URL -e JWT_ACCESS_SECRET -e JWT_REFRESH_SECRET \
+            -e DATABASE_URL -e DIRECT_URL -e REDIS_URL -e JWT_ACCESS_SECRET -e JWT_REFRESH_SECRET \
             -e METRICS_AUTH_TOKEN -e APP_BASE_URL=https://sales.example.com \
             -e EMAIL_DELIVERY_MODE=smtp -e EMAIL_FROM=no-reply@sales.example.com \
-            -e SMTP_HOST=smtp.example.com ai-sales-platform:ci
+            -e SMTP_HOST=127.0.0.1 ai-sales-platform:ci
           for _ in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:4000/api/health/ready; then exit 0; fi
             sleep 2

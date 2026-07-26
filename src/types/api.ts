@@ -7,6 +7,15 @@ export interface UserSettings {
   aiProvider: AiProvider;
   theme: Theme;
   notifications: boolean;
+  organization?: string;
+  timezone?: string;
+  language?: string;
+  dataRetentionDays?: number;
+  campaignDailyLimit?: number;
+  unsubscribeFooter?: string;
+  senderName?: string;
+  senderEmail?: string;
+  privacyMode?: string;
 }
 
 export interface AuthUser {
@@ -14,7 +23,7 @@ export interface AuthUser {
   email: string;
   emailVerified: boolean;
   name: string;
-  role: "ADMIN" | "MEMBER";
+  role: "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
   settings: UserSettings;
 }
 

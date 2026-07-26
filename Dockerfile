@@ -34,7 +34,7 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/server/dist ./server/dist
 COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
-COPY scripts ./scripts
+COPY scripts/database-backup.mjs scripts/database-restore.mjs ./scripts/
 COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/ai-sales-start
 
 USER node

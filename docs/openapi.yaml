@@ -17,6 +17,11 @@ tags:
   - { name: Reports, description: Database-aggregated sales reporting }
   - { name: Settings, description: User profile and preferences }
   - { name: AI, description: Research and email generation }
+  - { name: Research, description: Evidence-grounded provider research }
+  - { name: Campaigns, description: Approval-gated outreach campaigns }
+  - { name: Operations, description: "Tasks, replies, and observed analytics" }
+  - { name: Webhooks, description: Signed provider delivery events }
+  - { name: Admin, description: Role-protected system operations }
 paths:
   /health/live:
     get:
@@ -237,6 +242,117 @@ paths:
       responses:
         "200": { description: Settings updated }
         "409": { $ref: "#/components/responses/Conflict" }
+  /settings/account:
+    delete:
+      operationId: deleteOwnAccount
+      tags: [Settings]
+      summary: Permanently delete the authenticated account after exact confirmation
+      responses:
+        "204": { description: Account and user-owned records deleted }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /research/status:
+    get:
+      operationId: getResearchProviderStatus
+      tags: [Research]
+      summary: Return sanitized search configuration state
+      responses:
+        "200": { description: Configuration state returned without secrets }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /research/jobs:
+    get:
+      operationId: listResearchJobs
+      tags: [Research]
+      summary: List owned structured research jobs
+      responses:
+        "200": { description: Research job page }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createResearchJob
+      tags: [Research]
+      summary: Run a confirmed provider search and evidence-grounded analysis
+      responses:
+        "201": { description: Structured research job completed }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /campaigns:
+    get:
+      operationId: listCampaigns
+      tags: [Campaigns]
+      summary: List owned campaigns
+      responses:
+        "200": { description: Campaigns returned }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      operationId: createCampaign
+      tags: [Campaigns]
+      summary: Create an unsent draft campaign
+      responses:
+        "201": { description: Draft campaign created }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /campaigns/{id}/approve:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: approveCampaign
+      tags: [Campaigns]
+      summary: Store an immutable approval snapshot for the current version
+      responses:
+        "201": { description: Campaign version approved }
+        "422": { $ref: "#/components/responses/BadRequest" }
+  /campaigns/{id}/queue:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: queueApprovedCampaign
+      tags: [Campaigns]
+      summary: Queue only current, explicitly approved messages
+      responses:
+        "200": { description: Approved unsuppressed messages queued }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /campaigns/{id}/send-approved:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: sendApprovedCampaignBatch
+      tags: [Campaigns]
+      summary: Process one explicit bounded batch after all safety checks
+      responses:
+        "200": { description: Bounded batch result }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /operations/inbox:
+    get:
+      operationId: getHumanReplyInbox
+      tags: [Operations]
+      summary: List owned replies requiring human judgment
+      responses:
+        "200": { description: Reply inbox returned }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /operations/tasks:
+    get:
+      operationId: listTasks
+      tags: [Operations]
+      summary: List owned operational tasks
+      responses:
+        "200": { description: Tasks returned }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /operations/analytics:
+    get:
+      operationId: getCampaignAnalytics
+      tags: [Operations]
+      summary: Return metrics computed from stored events only
+      responses:
+        "200": { description: Observed analytics returned }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /admin/overview:
+    get:
+      operationId: getAdminOverview
+      tags: [Admin]
+      summary: Return aggregate health and sanitized audit metadata
+      responses:
+        "200": { description: Admin overview returned }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /ai/demo:
     post:
       operationId: runAiDemo
@@ -264,6 +380,38 @@ paths:
         "200": { description: AI email result }
         "429": { $ref: "#/components/responses/RateLimited" }
         "502": { $ref: "#/components/responses/BadGateway" }
+  /webhooks/email/{provider}:
+    post:
+      operationId: receiveEmailWebhook
+      tags: [Webhooks]
+      security: []
+      summary: Receive an idempotent, timestamped, HMAC-signed email event
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [resend, sendgrid, postmark, smtp] }
+        - name: X-Webhook-Timestamp
+          in: header
+          required: true
+          description: Unix seconds within five minutes of receipt.
+          schema: { type: string, pattern: "^[0-9]{10}$" }
+        - name: X-Webhook-Signature
+          in: header
+          required: true
+          description: HMAC-SHA256 of `<timestamp>.<exact raw JSON body>` using EMAIL_WEBHOOK_SECRET.
+          schema: { type: string, pattern: "^sha256=[A-Fa-f0-9]{64}$" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EmailWebhookEvent" }
+      responses:
+        "200": { description: Duplicate event accepted idempotently }
+        "202": { description: New or unknown-message event accepted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -319,6 +467,15 @@ components:
         status: { $ref: "#/components/schemas/LeadStatus" }
         value: { type: number, minimum: 0, maximum: 9999999999999.99 }
         notes: { type: [string, "null"], maxLength: 10000 }
+    EmailWebhookEvent:
+      type: object
+      additionalProperties: false
+      required: [providerEventId, messageId, type, occurredAt]
+      properties:
+        providerEventId: { type: string, minLength: 1, maxLength: 200 }
+        messageId: { type: string, minLength: 1, maxLength: 64 }
+        type: { type: string, enum: [DELIVERED, BOUNCED, COMPLAINT, UNSUBSCRIBED, REPLIED] }
+        occurredAt: { type: string, format: date-time }
     Error:
       type: object
       required: [error]

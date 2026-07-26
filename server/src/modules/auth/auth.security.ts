@@ -70,22 +70,41 @@ export interface UserWithSettings {
     aiProvider: "MOCK" | "GROQ";
     theme: "DARK" | "LIGHT" | "SYSTEM";
     notifications: boolean;
+    organization?: string;
+    timezone?: string;
+    language?: string;
+    dataRetentionDays?: number;
+    campaignDailyLimit?: number;
+    unsubscribeFooter?: string;
+    senderName?: string;
+    senderEmail?: string;
+    privacyMode?: string;
   } | null;
 }
 
 export function serializeUser(user: UserWithSettings) {
+  const settings = user.settings;
   return {
     id: user.id,
     email: user.email,
     emailVerified: user.emailVerifiedAt !== null,
     name: user.name,
     role: user.role,
-    settings: user.settings ?? {
-      company: "",
-      signature: "",
-      aiProvider: "MOCK" as const,
-      theme: "DARK" as const,
-      notifications: true,
+    settings: {
+      company: settings?.company ?? "",
+      signature: settings?.signature ?? "",
+      aiProvider: settings?.aiProvider ?? ("MOCK" as const),
+      theme: settings?.theme ?? ("DARK" as const),
+      notifications: settings?.notifications ?? true,
+      organization: settings?.organization ?? "",
+      timezone: settings?.timezone ?? "UTC",
+      language: settings?.language ?? "en",
+      dataRetentionDays: settings?.dataRetentionDays ?? 90,
+      campaignDailyLimit: settings?.campaignDailyLimit ?? 25,
+      unsubscribeFooter: settings?.unsubscribeFooter ?? "",
+      senderName: settings?.senderName ?? "",
+      senderEmail: settings?.senderEmail ?? "",
+      privacyMode: settings?.privacyMode ?? "STANDARD",
     },
   };
 }

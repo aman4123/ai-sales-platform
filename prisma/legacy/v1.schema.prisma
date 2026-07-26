@@ -1,0 +1,152 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../../server/src/generated/prisma"
+  engineType   = "client"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+}
+
+enum LeadStatus {
+  INTERESTED
+  MEETING
+  FOLLOW_UP
+  PROPOSAL_SENT
+  CLOSED
+  LOST
+}
+
+enum AiProvider {
+  MOCK
+  GROQ
+}
+
+enum Theme {
+  DARK
+  LIGHT
+  SYSTEM
+}
+
+enum AiRequestType {
+  RESEARCH
+  EMAIL
+}
+
+enum AccountTokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+model User {
+  id                String           @id @default(cuid())
+  email             String           @unique
+  emailVerifiedAt   DateTime?
+  passwordHash      String
+  passwordChangedAt DateTime?
+  name              String
+  role              UserRole         @default(MEMBER)
+  leads             Lead[]
+  settings          UserSettings?
+  sessions          RefreshSession[]
+  aiRequests        AiRequest[]
+  accountTokens     AccountToken[]
+  recoveryCodes     RecoveryCode[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+}
+
+model AccountToken {
+  id        String           @id @default(cuid())
+  tokenHash String           @unique
+  type      AccountTokenType
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, expiresAt])
+  @@index([expiresAt])
+}
+
+model RecoveryCode {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  userId    String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+}
+
+model RefreshSession {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userId     String
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+model Lead {
+  id        String     @id @default(cuid())
+  company   String
+  contact   String
+  email     String?
+  phone     String?
+  industry  String?
+  status    LeadStatus @default(INTERESTED)
+  value     Decimal    @default(0) @db.Decimal(15, 2)
+  notes     String?
+  userId    String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt, id])
+  @@index([userId, status])
+  @@index([company(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_company_trgm_idx")
+  @@index([contact(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_contact_trgm_idx")
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_email_trgm_idx")
+  @@index([industry(ops: raw("gin_trgm_ops"))], type: Gin, map: "Lead_industry_trgm_idx")
+}
+
+model UserSettings {
+  id            String     @id @default(cuid())
+  userId        String     @unique
+  company       String     @default("")
+  signature     String     @default("")
+  aiProvider    AiProvider @default(MOCK)
+  theme         Theme      @default(DARK)
+  notifications Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  user          User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AiRequest {
+  id        String        @id @default(cuid())
+  type      AiRequestType
+  prompt    String
+  response  String
+  provider  AiProvider
+  userId    String
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, createdAt])
+}

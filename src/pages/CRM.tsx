@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router";
 import toast from "react-hot-toast";
 import Layout from "../components/layout/Layout";
 import type { Lead, LeadStatus } from "../types/lead";
@@ -10,7 +10,7 @@ import {
   removeLead,
   updateLead,
 } from "../services/leadStorage";
-import { apiErrorMessage } from "../services/api";
+import { api, apiErrorMessage } from "../services/api";
 import { getReports } from "../services/reports";
 import type { ReportData } from "../types/api";
 
@@ -25,6 +25,25 @@ const currency = new Intl.NumberFormat("en-IN", {
   currency: "INR",
   maximumFractionDigits: 2,
 });
+
+interface CompanyRecord {
+  id: string;
+  name: string;
+  domain: string | null;
+  industry: string | null;
+  confidenceScore: number;
+  riskFlags: string[];
+  _count: { contacts: number };
+}
+
+interface ContactRecord {
+  id: string;
+  name: string;
+  jobTitle: string | null;
+  publicEmail: string | null;
+  verificationStatus: string;
+  company: { id: string; name: string } | null;
+}
 
 export default function CRM() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -43,6 +62,33 @@ export default function CRM() {
   const [value, setValue] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [companies, setCompanies] = useState<CompanyRecord[]>([]);
+  const [contacts, setContacts] = useState<ContactRecord[]>([]);
+  const [contactForm, setContactForm] = useState({ companyId: "", name: "", jobTitle: "", publicEmail: "", publicSourceUrl: "" });
+
+  const loadV2Records = useCallback(async (signal?: AbortSignal) => {
+    const [companyResponse, contactResponse] = await Promise.all([
+      api.get<{ data: { companies: CompanyRecord[] } }>("/crm/companies?limit=100&sort=name", { signal }),
+      api.get<{ data: { contacts: ContactRecord[] } }>("/crm/contacts?limit=100&sort=name", { signal }),
+    ]);
+    return {
+      companies: companyResponse.data.data.companies,
+      contacts: contactResponse.data.data.contacts,
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadV2Records(controller.signal)
+      .then((records) => {
+        setCompanies(records.companies);
+        setContacts(records.contacts);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) toast.error(apiErrorMessage(error, "Could not load companies and contacts."));
+      });
+    return () => controller.abort();
+  }, [loadV2Records, reloadKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -167,6 +213,30 @@ export default function CRM() {
     }
   }
 
+  async function createContact(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await api.post("/crm/contacts", {
+        companyId: contactForm.companyId,
+        name: contactForm.name,
+        jobTitle: contactForm.jobTitle,
+        publicEmail: contactForm.publicEmail,
+        publicSourceUrl: contactForm.publicSourceUrl,
+        verificationStatus: "PARTIALLY_VERIFIED",
+      });
+      setContactForm({ companyId: "", name: "", jobTitle: "", publicEmail: "", publicSourceUrl: "" });
+      const records = await loadV2Records();
+      setCompanies(records.companies);
+      setContacts(records.contacts);
+      toast.success("Public professional contact added.");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "Could not create the contact."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const statusCount = (name: string) =>
     reports.status.find((entry) => entry.name === name)?.value ?? 0;
 
@@ -215,6 +285,30 @@ export default function CRM() {
           <h2 className="mt-2 text-3xl font-bold text-purple-400">{reports.summary.closedDeals}</h2>
         </div>
       </div>
+
+      <section className="mt-8 rounded-xl border border-slate-800 bg-slate-900 p-6" aria-labelledby="verified-crm-heading">
+        <h2 id="verified-crm-heading" className="text-xl font-semibold">Researched companies and public contacts</h2>
+        <p className="mt-2 text-sm text-slate-400">Research evidence and public contact sources remain visible; unknown fields stay empty.</p>
+        <div className="mt-5 grid gap-6 xl:grid-cols-2">
+          <div>
+            <h3 className="font-semibold">Companies</h3>
+            <div className="mt-3 space-y-3">{companies.length ? companies.map((record) => <article key={record.id} className="rounded-xl bg-slate-950 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="font-medium">{record.name}</p><span className="text-xs text-cyan-300">Confidence {Math.round(record.confidenceScore)}%</span></div><p className="mt-2 text-sm text-slate-400">{record.domain ?? "Domain not verified"} · {record.industry ?? "Industry not verified"}</p><p className="mt-2 text-xs text-slate-500">{record._count.contacts} public contacts · {record.riskFlags.join(", ") || "No recorded flags"}</p></article>) : <p className="rounded-xl border border-dashed border-slate-700 p-5 text-sm text-slate-500">No researched companies have been saved.</p>}</div>
+            <h3 className="mt-6 font-semibold">Contacts</h3>
+            <div className="mt-3 space-y-2">{contacts.length ? contacts.map((record) => <p key={record.id} className="rounded-xl bg-slate-950 p-4 text-sm"><span className="font-medium">{record.name}</span> · {record.jobTitle ?? "Title not verified"} · {record.company?.name ?? "No company"}<span className="mt-1 block text-xs text-slate-500">{record.publicEmail ?? "Email not verified"} · {record.verificationStatus.replaceAll("_", " ")}</span></p>) : <p className="text-sm text-slate-500">No public contacts added.</p>}</div>
+          </div>
+          <form onSubmit={createContact} className="rounded-xl border border-slate-800 p-5">
+            <h3 className="font-semibold">Add sourced public contact</h3>
+            <div className="mt-4 grid gap-3">
+              <label className="text-sm text-slate-300">Saved company<select required value={contactForm.companyId} onChange={(event) => setContactForm({ ...contactForm, companyId: event.target.value })} className="mt-2 w-full rounded-lg bg-slate-950 p-3"><option value="">Select a saved company</option>{companies.map((record) => <option key={record.id} value={record.id}>{record.name}</option>)}</select></label>
+              <label className="text-sm text-slate-300">Contact name<input required value={contactForm.name} onChange={(event) => setContactForm({ ...contactForm, name: event.target.value })} className="mt-2 w-full rounded-lg bg-slate-950 p-3" /></label>
+              <label className="text-sm text-slate-300">Public job title<input value={contactForm.jobTitle} onChange={(event) => setContactForm({ ...contactForm, jobTitle: event.target.value })} className="mt-2 w-full rounded-lg bg-slate-950 p-3" /></label>
+              <label className="text-sm text-slate-300">Public professional email<input type="email" required value={contactForm.publicEmail} onChange={(event) => setContactForm({ ...contactForm, publicEmail: event.target.value })} className="mt-2 w-full rounded-lg bg-slate-950 p-3" /></label>
+              <label className="text-sm text-slate-300">Public source URL<input type="url" required value={contactForm.publicSourceUrl} onChange={(event) => setContactForm({ ...contactForm, publicSourceUrl: event.target.value })} className="mt-2 w-full rounded-lg bg-slate-950 p-3" /></label>
+            </div>
+            <button type="submit" disabled={saving || companies.length === 0} className="mt-4 rounded-lg bg-cyan-300 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">Add public contact</button>
+          </form>
+        </div>
+      </section>
 
       <form id="lead-form" className="mt-8 rounded-xl bg-slate-900 p-6" onSubmit={saveLead}>
         <h2 className="mb-5 text-xl font-semibold">{editingId ? "Edit Lead" : "Add New Lead"}</h2>

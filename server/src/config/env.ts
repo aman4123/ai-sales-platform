@@ -99,15 +99,62 @@ const envSchema = z.object({
   AI_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).default(3_600_000),
   AI_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
   GROQ_API_KEY: optionalSecret,
+  TEST_GROQ_API_URL: optionalUrl,
   GROQ_MODEL: z.string().trim().min(1).default("openai/gpt-oss-120b"),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   AI_RESPONSE_MAX_BYTES: z.coerce.number().int().min(1_024).max(1_048_576).default(262_144),
   AI_MAX_TOKENS: z.coerce.number().int().min(64).max(8_192).default(1_500),
   AI_MONTHLY_REQUEST_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(0),
   AI_HISTORY_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(90),
+  SEARCH_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  SEARCH_PROVIDER: z.enum(["TAVILY", "BRAVE", "SERPER"]).default("TAVILY"),
+  TAVILY_API_KEY: optionalSecret,
+  TEST_TAVILY_API_URL: optionalUrl,
+  TEST_EMAIL_FAILURE_SUBJECT: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().trim().min(1).max(160).optional(),
+  ),
+  BRAVE_SEARCH_API_KEY: optionalSecret,
+  SERPER_API_KEY: optionalSecret,
+  SEARCH_MONTHLY_REQUEST_LIMIT: z.coerce.number().int().min(0).max(1_000_000).default(0),
+  SEARCH_RESULT_LIMIT: z.coerce.number().int().min(1).max(20).default(5),
+  SEARCH_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(30_000).default(10_000),
+  SEARCH_RESPONSE_MAX_BYTES: z.coerce.number().int().min(4_096).max(2_097_152).default(262_144),
+  SEARCH_CACHE_TTL_SECONDS: z.coerce.number().int().min(60).max(86_400).default(3_600),
+  SEARCH_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(2),
+  OUTBOUND_EMAIL_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  OUTBOUND_DELIVERY_MODE: z.enum(["disabled", "test", "live"]).default("disabled"),
+  OUTBOUND_TEST_RECIPIENT: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().trim().toLowerCase().email().optional(),
+  ),
+  OUTBOUND_DAILY_LIMIT: z.coerce.number().int().min(1).max(1_000).default(25),
+  OUTBOUND_FOLLOW_UP_LIMIT: z.coerce.number().int().min(0).max(3).default(2),
+  EMAIL_WEBHOOK_SECRET: optionalSecret,
+  INITIAL_ADMIN_EMAIL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().trim().toLowerCase().email().optional(),
+  ),
   MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(60_000).max(86_400_000).default(21_600_000),
 }).superRefine((configuration, context) => {
   const placeholderPattern = /replace-with|change-me|changeme/i;
+
+  if (
+    configuration.NODE_ENV !== "test" &&
+    (configuration.TEST_GROQ_API_URL || configuration.TEST_TAVILY_API_URL || configuration.TEST_EMAIL_FAILURE_SUBJECT)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["NODE_ENV"],
+      message: "Deterministic provider overrides are permitted only in the test environment.",
+    });
+  }
 
   if (configuration.JWT_ACCESS_SECRET === configuration.JWT_REFRESH_SECRET) {
     context.addIssue({
@@ -292,6 +339,67 @@ const envSchema = z.object({
       code: "custom",
       path: ["RESEND_API_URL"],
       message: "The production Resend API URL must use HTTPS.",
+    });
+  }
+
+  if (configuration.SEARCH_ENABLED) {
+    const providerKey = {
+      TAVILY: configuration.TAVILY_API_KEY,
+      BRAVE: configuration.BRAVE_SEARCH_API_KEY,
+      SERPER: configuration.SERPER_API_KEY,
+    }[configuration.SEARCH_PROVIDER];
+    if (!providerKey || providerKey.length < 16) {
+      context.addIssue({
+        code: "custom",
+        path: [`${configuration.SEARCH_PROVIDER}_API_KEY`],
+        message: `SEARCH_ENABLED requires a configured ${configuration.SEARCH_PROVIDER} API key.`,
+      });
+    }
+    if (configuration.SEARCH_MONTHLY_REQUEST_LIMIT < 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["SEARCH_MONTHLY_REQUEST_LIMIT"],
+        message: "Live search requires a positive monthly request limit.",
+      });
+    }
+  }
+
+  if (configuration.OUTBOUND_EMAIL_ENABLED && configuration.EMAIL_DELIVERY_MODE === "log") {
+    context.addIssue({
+      code: "custom",
+      path: ["OUTBOUND_EMAIL_ENABLED"],
+      message: "Outbound campaign email requires SMTP or Resend delivery.",
+    });
+  }
+  if (configuration.OUTBOUND_EMAIL_ENABLED && configuration.OUTBOUND_DELIVERY_MODE === "disabled") {
+    context.addIssue({
+      code: "custom",
+      path: ["OUTBOUND_DELIVERY_MODE"],
+      message: "Enabled outbound email requires test or live delivery mode.",
+    });
+  }
+  if (!configuration.OUTBOUND_EMAIL_ENABLED && configuration.OUTBOUND_DELIVERY_MODE !== "disabled") {
+    context.addIssue({
+      code: "custom",
+      path: ["OUTBOUND_DELIVERY_MODE"],
+      message: "Test or live delivery mode requires OUTBOUND_EMAIL_ENABLED=true.",
+    });
+  }
+  if (configuration.OUTBOUND_DELIVERY_MODE === "test" && !configuration.OUTBOUND_TEST_RECIPIENT) {
+    context.addIssue({
+      code: "custom",
+      path: ["OUTBOUND_TEST_RECIPIENT"],
+      message: "Test delivery mode requires one allowlisted recipient.",
+    });
+  }
+  if (
+    configuration.OUTBOUND_DELIVERY_MODE === "live" &&
+    (!configuration.EMAIL_WEBHOOK_SECRET || configuration.EMAIL_WEBHOOK_SECRET.length < 32)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["EMAIL_WEBHOOK_SECRET"],
+      message: "Live delivery requires an independent webhook signing secret of at least 32 characters.",
     });
   }
 });

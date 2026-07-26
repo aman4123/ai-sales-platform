@@ -127,4 +127,19 @@ describe("transactional email adapter", () => {
       url: "https://sales.example.com/verify-email?token=safe",
     })).rejects.toThrow("Resend rejected the email with HTTP 429");
   });
+
+  it("allows only the configured recipient in test campaign delivery mode", async () => {
+    vi.stubEnv("EMAIL_DELIVERY_MODE", "smtp");
+    vi.stubEnv("SMTP_HOST", "127.0.0.1");
+    vi.stubEnv("OUTBOUND_EMAIL_ENABLED", "true");
+    vi.stubEnv("OUTBOUND_DELIVERY_MODE", "test");
+    vi.stubEnv("OUTBOUND_TEST_RECIPIENT", "allowed@example.test");
+    const { createEmailService } = await import("./email.js");
+    const service = createEmailService();
+    const message = { subject: "Subject", greeting: "Hello,", body: "Grounded body", cta: "Reply if useful.", closing: "Regards,", signature: "Sales User", unsubscribeFooter: "Reply unsubscribe to opt out." };
+
+    await service.sendCampaign?.({ ...message, to: "allowed@example.test" });
+    await expect(service.sendCampaign?.({ ...message, to: "blocked@example.test" })).rejects.toThrow("outside the allowlist");
+    expect(sendMail).toHaveBeenCalledTimes(1);
+  });
 });

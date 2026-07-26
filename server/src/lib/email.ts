@@ -14,10 +14,22 @@ interface AccountNoticeInput {
   to: string;
 }
 
+export interface CampaignEmailInput {
+  to: string;
+  subject: string;
+  greeting: string;
+  body: string;
+  cta: string;
+  closing: string;
+  signature: string;
+  unsubscribeFooter: string;
+}
+
 export interface EmailService {
   sendVerification(input: AccountEmailInput): Promise<void>;
   sendPasswordReset(input: AccountEmailInput): Promise<void>;
   sendRecoveryNotice?(input: AccountNoticeInput): Promise<void>;
+  sendCampaign?(input: CampaignEmailInput): Promise<void>;
 }
 
 function escapeHtml(value: string) {
@@ -100,6 +112,52 @@ class AccountEmailService implements EmailService {
       subject: "Your AI Sales Platform account was recovered",
       text: `Hello ${name},\n\nYour password was changed using a recovery code and all active sessions were revoked. If you did not perform this recovery, contact support immediately.`,
       html: `<p>Hello ${safeName},</p><p>Your password was changed using a recovery code and all active sessions were revoked.</p><p>If you did not perform this recovery, contact support immediately.</p>`,
+    });
+  }
+
+  async sendCampaign(input: CampaignEmailInput) {
+    if (!env.OUTBOUND_EMAIL_ENABLED) {
+      throw new Error("Outbound campaign email is disabled.");
+    }
+    if (
+      env.OUTBOUND_DELIVERY_MODE === "test" &&
+      input.to.trim().toLowerCase() !== env.OUTBOUND_TEST_RECIPIENT
+    ) {
+      throw new Error("Test delivery refused a recipient outside the allowlist.");
+    }
+    if (env.OUTBOUND_DELIVERY_MODE === "disabled") {
+      throw new Error("Outbound campaign delivery mode is disabled.");
+    }
+    if (env.TEST_EMAIL_FAILURE_SUBJECT && input.subject.includes(env.TEST_EMAIL_FAILURE_SUBJECT)) {
+      throw new Error("The deterministic test email provider is unavailable.");
+    }
+    const text = [
+      input.greeting,
+      "",
+      input.body,
+      "",
+      input.cta,
+      "",
+      input.closing,
+      input.signature,
+      "",
+      input.unsubscribeFooter,
+    ]
+      .filter((line, index, values) => line || values[index - 1] !== "")
+      .join("\n");
+    const html = [
+      `<p>${escapeHtml(input.greeting)}</p>`,
+      `<p>${escapeHtml(input.body).replace(/\n/g, "<br>")}</p>`,
+      `<p>${escapeHtml(input.cta)}</p>`,
+      `<p>${escapeHtml(input.closing)}<br>${escapeHtml(input.signature).replace(/\n/g, "<br>")}</p>`,
+      `<p>${escapeHtml(input.unsubscribeFooter)}</p>`,
+    ].join("");
+    await this.send({
+      kind: "approved_campaign",
+      to: input.to,
+      subject: input.subject,
+      text,
+      html,
     });
   }
 

@@ -1,23 +1,35 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router";
 import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
+  Bot,
+  ClipboardList,
+  Command,
+  ContactRound,
   LayoutDashboard,
   LogOut,
   Mail,
+  Megaphone,
+  MessageSquareReply,
   Search,
   Settings,
+  ShieldCheck,
   Users,
   X,
 } from "lucide-react";
 import { useAuth } from "../../contexts/auth-context";
 
 const menu = [
-  { name: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
+  { name: "Overview", icon: LayoutDashboard, path: "/dashboard" },
+  { name: "Command Center", icon: Command, path: "/command" },
   { name: "Research", icon: Search, path: "/research" },
+  { name: "Leads", icon: ContactRound, path: "/leads" },
   { name: "CRM", icon: Users, path: "/crm" },
-  { name: "Email", icon: Mail, path: "/email" },
-  { name: "Reports", icon: BarChart3, path: "/reports" },
+  { name: "Campaigns", icon: Megaphone, path: "/campaigns" },
+  { name: "Inbox", icon: MessageSquareReply, path: "/inbox" },
+  { name: "Tasks", icon: ClipboardList, path: "/tasks" },
+  { name: "Analytics", icon: BarChart3, path: "/analytics" },
+  { name: "Email Studio", icon: Mail, path: "/email" },
   { name: "Settings", icon: Settings, path: "/settings" },
 ];
 
@@ -37,6 +49,9 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       && window.matchMedia("(min-width: 64rem)").matches,
   );
   const visible = open || desktop;
+  const navigationItems = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN"
+    ? [...menu, { name: "Admin", icon: ShieldCheck, path: "/admin" }]
+    : menu;
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -106,7 +121,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         <div className="flex items-start justify-between border-b border-slate-800 p-8">
           <div>
             <h1 className="text-3xl font-bold text-blue-500">AI Sales</h1>
-            <p className="mt-2 text-sm text-slate-400">Sales Automation Platform</p>
+            <p className="mt-2 text-sm text-slate-400">Human-approved sales OS</p>
           </div>
           <button
             ref={closeButtonRef}
@@ -120,7 +135,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         </div>
 
         <nav className="flex-1 space-y-2 overflow-y-auto p-5" aria-label="Main menu">
-          {menu.map((item) => {
+          {navigationItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname === item.path;
 
@@ -130,7 +145,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                 to={item.path}
                 onClick={onClose}
                 aria-current={active ? "page" : undefined}
-                className={`flex items-center gap-3 rounded-xl px-5 py-4 transition ${
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm transition ${
                   active ? "bg-blue-600 text-white" : "hover:bg-slate-800"
                 }`}
               >
@@ -152,9 +167,9 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           </button>
 
           <div className="rounded-xl bg-slate-800 p-4">
-            <p className="text-sm text-slate-400">AI Provider</p>
+            <p className="flex items-center gap-2 text-sm text-slate-400"><Bot size={15} /> AI provider</p>
             <p className="mt-1 font-semibold">
-              {user?.settings.aiProvider === "GROQ" ? "Groq" : "Mock AI"}
+              {user?.settings.aiProvider === "GROQ" ? "Groq · approval gated" : "Mock AI · no live claims"}
             </p>
           </div>
         </div>

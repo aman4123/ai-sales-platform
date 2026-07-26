@@ -80,6 +80,22 @@ describe("production environment validation", () => {
     });
   });
 
+  it("rejects deterministic provider overrides outside the test environment", async () => {
+    applyEnvironment({ TEST_EMAIL_FAILURE_SUBJECT: "Simulated provider failure" });
+
+    await expect(import("./env.js")).rejects.toThrow(/permitted only in the test environment/);
+  });
+
+  it("requires a strong webhook signing secret before live delivery can start", async () => {
+    applyEnvironment({
+      OUTBOUND_EMAIL_ENABLED: "true",
+      OUTBOUND_DELIVERY_MODE: "live",
+      EMAIL_WEBHOOK_SECRET: "short",
+    });
+
+    await expect(import("./env.js")).rejects.toThrow(/webhook signing secret/);
+  });
+
   it("normalizes a Redis URL copied as an environment assignment", async () => {
     const redisUrl = "rediss://default:secure-redis-password@free-cache.upstash.io:6379";
     applyEnvironment({ REDIS_URL: `REDIS_URL="${redisUrl}"\n` });

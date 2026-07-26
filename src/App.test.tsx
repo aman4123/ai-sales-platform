@@ -6,7 +6,7 @@ describe("application shell", () => {
   it("renders the lazy public landing route", async () => {
     window.history.replaceState({}, "", "/");
     render(<App />);
-    expect(await screen.findByRole("heading", { name: "AI Sales Platform" }))
+    expect(await screen.findByRole("heading", { name: /Turn a sales goal into approved outreach/i }))
       .toBeInTheDocument();
   });
 });

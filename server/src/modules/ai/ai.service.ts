@@ -2,7 +2,7 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 
-const GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_CHAT_COMPLETIONS_URL = env.TEST_GROQ_API_URL ?? "https://api.groq.com/openai/v1/chat/completions";
 
 const groqResponseSchema = z.object({
   choices: z.array(
