@@ -105,9 +105,9 @@ export function containsPromptInjection(content: string): boolean {
 
 export function sanitizeResearchContent(content: string): string {
   const withoutMarkup = content
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/gi, " ")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, " ")
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\b[^>]*>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&(nbsp|amp|lt|gt);/gi, (entity, name: string) => ({
       nbsp: " ",
