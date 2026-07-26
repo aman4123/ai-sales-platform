@@ -105,14 +105,16 @@ export function containsPromptInjection(content: string): boolean {
 
 export function sanitizeResearchContent(content: string): string {
   const withoutMarkup = content
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript\s*>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">");
+    .replace(/&(nbsp|amp|lt|gt);/gi, (entity, name: string) => ({
+      nbsp: " ",
+      amp: "&",
+      lt: "<",
+      gt: ">",
+    })[name.toLowerCase()] ?? entity);
   return [...withoutMarkup]
     .filter((character) => {
       const code = character.charCodeAt(0);

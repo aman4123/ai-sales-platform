@@ -82,7 +82,12 @@ export interface GroundedResearchOutput {
 function sourceType(result: SearchResult): GroundingEvidence["sourceType"] {
   const hostname = new URL(result.url).hostname.toLowerCase();
   if (hostname.endsWith(".gov") || hostname.includes(".gov.")) return "GOVERNMENT_REGISTRY";
-  if (hostname.includes("linkedin.com") || hostname.includes("x.com")) return "SOCIAL_PROFILE";
+  if (
+    hostname === "linkedin.com" ||
+    hostname.endsWith(".linkedin.com") ||
+    hostname === "x.com" ||
+    hostname.endsWith(".x.com")
+  ) return "SOCIAL_PROFILE";
   if (/(crunchbase|zoominfo|dnb|clutch)\./.test(hostname)) return "BUSINESS_DIRECTORY";
   return "OTHER";
 }

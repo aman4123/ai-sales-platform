@@ -19,6 +19,8 @@ describe("research retrieval security", () => {
     const result = await assertSafePublicUrl("https://example.com/path", async () => [{ address: "93.184.216.34", family: 4 }]);
     expect(result.hostname).toBe("example.com");
     expect(sanitizeResearchContent("<script>steal()</script><p>Public &amp; safe</p>")).toBe("Public & safe");
+    expect(sanitizeResearchContent("<script>steal()</script ><p>Still safe</p>")).toBe("Still safe");
+    expect(sanitizeResearchContent("&amp;lt;script&amp;gt;steal()&amp;lt;/script&amp;gt;")).toBe("&lt;script&gt;steal()&lt;/script&gt;");
   });
 
   it("discards retrieved content containing prompt injection", async () => {

@@ -58,6 +58,27 @@ describe("research grounding", () => {
     expect(JSON.stringify(grounded.candidates[0]?.evidence)).not.toMatch(/ignore previous|reveal your instructions/i);
     expect(grounded.candidates[0]?.evidence.some((item) => item.field === "description")).toBe(false);
     expect(evidenceConflicts([...evidence, { ...evidence[0]!, id: "ev-2", value: "https://other.example" }])).toEqual(["website"]);
+
+    const socialSources = evidenceFromSearch({
+      provider: "BRAVE",
+      query: "social profiles",
+      retrievedAt: new Date().toISOString(),
+      results: [
+        { title: "LinkedIn", url: "https://www.linkedin.com/company/example", snippet: "Profile" },
+        { title: "Fake LinkedIn", url: "https://linkedin.com.evil.example/company/example", snippet: "Impostor" },
+        { title: "X", url: "https://x.com/example", snippet: "Profile" },
+        { title: "Fake X", url: "https://x.com.evil.example/example", snippet: "Impostor" },
+      ],
+    });
+    const sourceTypes = new Map(socialSources.candidates.map((candidate) => [
+      candidate.domain,
+      candidate.evidence[0]?.sourceType,
+    ]));
+
+    expect(sourceTypes.get("linkedin.com")).toBe("SOCIAL_PROFILE");
+    expect(sourceTypes.get("linkedin.com.evil.example")).toBe("OTHER");
+    expect(sourceTypes.get("x.com")).toBe("SOCIAL_PROFILE");
+    expect(sourceTypes.get("x.com.evil.example")).toBe("OTHER");
   });
 
   it("explicitly denies browsing, invention, prompt leakage, and fabricated citations", () => {
