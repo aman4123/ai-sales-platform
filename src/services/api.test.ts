@@ -12,6 +12,9 @@ const session: AuthPayload = {
     emailVerified: true,
     name: "Sales User",
     role: "MEMBER",
+    accountRole: "MEMBER",
+    accessMode: "USER",
+    availableModes: [],
     settings: {
       company: "Example",
       signature: "",

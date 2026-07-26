@@ -18,8 +18,12 @@ export default function Login({ mode }: LoginProps) {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [registration, setRegistration] = useState<RegistrationPayload | null>(null);
   const isRegister = mode === "register";
+  const locationState = location.state as {
+    from?: { pathname?: string };
+    registration?: RegistrationPayload;
+  } | null;
+  const registration = !isRegister ? locationState?.registration ?? null : null;
 
   if (user) return <Navigate to="/dashboard" replace />;
 
@@ -30,12 +34,13 @@ export default function Login({ mode }: LoginProps) {
 
     try {
       if (isRegister) {
-        setRegistration(await register(name, email, password));
+        const result = await register(name, email, password);
+        navigate("/login", { replace: true, state: { registration: result } });
         return;
       }
       await login(email, password);
 
-      const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+      const from = locationState?.from?.pathname;
       navigate(from || "/dashboard", { replace: true });
     } catch (requestError) {
       setError(apiErrorMessage(requestError, "Authentication failed."));
@@ -44,37 +49,31 @@ export default function Login({ mode }: LoginProps) {
     }
   }
 
-  if (registration) {
-    const verificationPath = registration.developmentVerificationToken
-      ? `/verify-email?token=${encodeURIComponent(registration.developmentVerificationToken)}`
-      : null;
-    return (
-      <AuthShell title="Check your email">
-        <p role="status" className="mt-6 text-slate-300">
-          We sent a verification link to <strong>{registration.email}</strong>. Verify the address before signing in.
-        </p>
-        {verificationPath && (
-          <Link className="mt-6 block rounded bg-blue-600 py-3 text-center text-white" to={verificationPath}>
-            Open development verification link
-          </Link>
-        )}
-        <Link className="mt-5 block text-center text-blue-400 hover:underline" to="/login">
-          Return to login
-        </Link>
-      </AuthShell>
-    );
-  }
+  const verificationPath = registration?.developmentVerificationToken
+    ? `/verify-email?token=${encodeURIComponent(registration.developmentVerificationToken)}`
+    : null;
 
   return (
     <AuthShell title={isRegister ? "Create Account" : "Login"}>
       <form onSubmit={submit}>
+
+        {registration && (
+          <div role="status" className="mt-6 rounded-xl border border-emerald-300/20 bg-emerald-300/[.06] p-4 text-sm leading-6 text-emerald-100">
+            Account created for <strong>{registration.email}</strong>. Check your email, verify the address, then sign in here.
+            {verificationPath && (
+              <Link className="mt-3 block font-semibold text-cyan-300 hover:text-cyan-200" to={verificationPath}>
+                Open development verification link
+              </Link>
+            )}
+          </div>
+        )}
 
         {isRegister && (
           <div className="mt-6">
             <label className="sr-only" htmlFor="auth-name">Full name</label>
             <input
               id="auth-name"
-              className="w-full rounded bg-slate-800 p-3 text-white"
+              className="w-full rounded-xl border border-white/10 bg-white/[.04] p-3.5 text-white placeholder:text-slate-500 focus:border-cyan-300/50 focus:outline-none"
               placeholder="Full Name"
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -90,7 +89,7 @@ export default function Login({ mode }: LoginProps) {
         <input
           id="auth-email"
           type="email"
-          className={`w-full ${isRegister ? "mt-4" : "mt-6"} p-3 rounded bg-slate-800 text-white`}
+          className={`w-full ${isRegister || registration ? "mt-4" : "mt-6"} rounded-xl border border-white/10 bg-white/[.04] p-3.5 text-white placeholder:text-slate-500 focus:border-cyan-300/50 focus:outline-none`}
           placeholder="Email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
@@ -103,7 +102,7 @@ export default function Login({ mode }: LoginProps) {
         <input
           id="auth-password"
           type="password"
-          className="w-full mt-4 p-3 rounded bg-slate-800 text-white"
+          className="mt-4 w-full rounded-xl border border-white/10 bg-white/[.04] p-3.5 text-white placeholder:text-slate-500 focus:border-cyan-300/50 focus:outline-none"
           placeholder="Password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -122,22 +121,22 @@ export default function Login({ mode }: LoginProps) {
         <button
           type="submit"
           disabled={submitting}
-          className="block w-full text-center mt-6 bg-blue-600 py-3 rounded text-white disabled:opacity-50"
+          className="mt-6 block w-full rounded-xl bg-cyan-300 py-3.5 text-center font-bold text-slate-950 transition hover:bg-cyan-200 disabled:opacity-50"
         >
           {submitting ? "Please wait..." : isRegister ? "Register" : "Login"}
         </button>
 
         <p className="mt-5 text-center text-sm text-slate-400">
           {isRegister ? "Already have an account?" : "New to AI Sales?"}{" "}
-          <Link className="text-blue-400 hover:underline" to={isRegister ? "/login" : "/register"}>
+          <Link className="font-semibold text-cyan-300 hover:text-cyan-200" to={isRegister ? "/login" : "/register"}>
             {isRegister ? "Login" : "Register"}
           </Link>
         </p>
         {!isRegister && (
           <div className="mt-4 flex flex-wrap justify-center gap-4 text-sm">
-            <Link className="text-blue-400 hover:underline" to="/forgot-password">Forgot password?</Link>
-            <Link className="text-blue-400 hover:underline" to="/recover-account">Use recovery code</Link>
-            <Link className="text-blue-400 hover:underline" to="/resend-verification">Resend verification</Link>
+            <Link className="text-cyan-300 hover:text-cyan-200" to="/forgot-password">Forgot password?</Link>
+            <Link className="text-cyan-300 hover:text-cyan-200" to="/recover-account">Use recovery code</Link>
+            <Link className="text-cyan-300 hover:text-cyan-200" to="/resend-verification">Resend verification</Link>
           </div>
         )}
       </form>

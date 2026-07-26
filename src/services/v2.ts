@@ -4,6 +4,7 @@ export interface ResearchStatus {
   enabled: boolean;
   provider: "TAVILY" | "BRAVE" | "SERPER";
   configured: boolean;
+  requiredEnvironmentVariable: string;
   message: string;
 }
 

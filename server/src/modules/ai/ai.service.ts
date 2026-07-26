@@ -52,32 +52,17 @@ async function readProviderPayload(response: Response): Promise<unknown> {
 }
 
 export function mockResearch(prompt: string): string {
-  return `AI Sales Analysis
+  return `Verified information
+Not verified.
 
-Prompt:
-${prompt}
+Not verified
+No source material was supplied for: ${prompt}
 
-Company: Example Technologies Pvt Ltd
+Recommended research steps
+Live web search is required.
 
-Industry:
-Software Development
-
-Employees:
-250+
-
-Pain Points:
-• Low outbound response rate
-• Manual lead research
-• No CRM automation
-
-Recommendations:
-• Use LinkedIn outreach
-• Automate follow-up emails
-• Integrate CRM with AI
-• Score leads automatically
-
-Confidence Score:
-94%`;
+Sales opportunity summary
+Not verified.`;
 }
 
 export function mockEmail(input: {
@@ -87,15 +72,20 @@ export function mockEmail(input: {
   tone: string;
   signature: string;
 }): string {
-  return `Subject: Helping ${input.company} accelerate sales in ${input.industry}
+  return `Subject:
+A practical idea for ${input.company}
 
+Greeting:
 Hi ${input.contact},
 
-I noticed ${input.company}'s work in ${input.industry} and wanted to reach out. Our AI Sales Platform helps teams research prospects, personalize outreach, and manage their pipeline from one place.
+Body:
+I am reaching out regarding ${input.company} and the ${input.industry} industry. I would be glad to share a concise overview of an AI-assisted sales workflow if it is relevant to your team.
 
-Would you be open to a 15-minute conversation next week to see whether this could support your goals?
+CTA:
+Would a brief overview be useful?
 
-Best regards${input.signature ? `,\n${input.signature}` : ""}`;
+Closing:
+${input.signature || "Best regards,"}`;
 }
 
 export async function askGroq(

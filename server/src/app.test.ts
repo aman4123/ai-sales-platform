@@ -68,6 +68,7 @@ function createMockDatabase() {
       upsert: vi.fn(),
     },
     aiRequest: { create: vi.fn(), deleteMany: vi.fn() },
+    auditLog: { create: vi.fn() },
     $transaction: vi.fn(),
     $queryRaw: vi.fn(),
   };
@@ -406,6 +407,35 @@ describe("production API", () => {
     expect(response.body.data.accessToken).toBeTypeOf("string");
     expect(response.headers["set-cookie"]?.[0]).toContain("refresh_token=");
     expect(mock.refreshSession.create).toHaveBeenCalledOnce();
+  });
+
+  it("lets only a signed Master Admin session switch into Tester Mode", async () => {
+    const { database, mock } = createMockDatabase();
+    const master = { ...user, role: "SUPER_ADMIN" as const };
+    mock.refreshSession.updateMany.mockResolvedValue({ count: 1 });
+    mock.user.findUnique.mockResolvedValue(master);
+    mock.auditLog.create.mockResolvedValue({});
+    const token = signAccessToken(
+      { id: master.id, email: master.email, role: master.role },
+      "session-master",
+      "MASTER_ADMIN",
+    );
+
+    const response = await request(createApp({ database, serveStatic: false }))
+      .post("/api/auth/mode")
+      .set("authorization", `Bearer ${token}`)
+      .send({ mode: "TESTER" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.user).toMatchObject({
+      role: "ADMIN",
+      accountRole: "SUPER_ADMIN",
+      accessMode: "TESTER",
+    });
+    expect(mock.refreshSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "session-master", userId: master.id }),
+      data: { accessMode: "TESTER" },
+    }));
   });
 
   it("revokes all active sessions when a refresh token is replayed", async () => {

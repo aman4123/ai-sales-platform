@@ -28,6 +28,7 @@ describe("account lifecycle pages", () => {
       register: vi.fn(),
       logout: vi.fn(),
       acceptSession,
+      switchMode: vi.fn(),
       updateUser: vi.fn(),
     });
   });

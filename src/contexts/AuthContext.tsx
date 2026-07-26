@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, refreshSession, setAccessToken } from "../services/api";
-import type { AuthPayload, AuthUser, RegistrationPayload } from "../types/api";
+import type { AccessMode, AuthPayload, AuthUser, RegistrationPayload } from "../types/api";
 import { AuthContext, type AuthContextValue } from "./auth-context";
 let initialSession: Promise<AuthPayload> | null = null;
 
@@ -77,6 +77,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       acceptSession(session) {
         setAccessToken(session.accessToken);
         setUser(session.user);
+      },
+      async switchMode(mode: AccessMode) {
+        const response = await api.post<{ data: AuthPayload }>("/auth/mode", { mode });
+        setAccessToken(response.data.data.accessToken);
+        setUser(response.data.data.user);
       },
       async logout() {
         try {

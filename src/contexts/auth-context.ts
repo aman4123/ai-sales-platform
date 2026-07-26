@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { AuthPayload, AuthUser, RegistrationPayload } from "../types/api";
+import type { AccessMode, AuthPayload, AuthUser, RegistrationPayload } from "../types/api";
 
 export interface AuthContextValue {
   user: AuthUser | null;
@@ -7,6 +7,7 @@ export interface AuthContextValue {
   login(email: string, password: string): Promise<void>;
   register(name: string, email: string, password: string): Promise<RegistrationPayload>;
   acceptSession(session: AuthPayload): void;
+  switchMode(mode: AccessMode): Promise<void>;
   logout(): Promise<void>;
   updateUser(user: AuthUser): void;
 }

@@ -141,6 +141,10 @@ const envSchema = z.object({
     (value) => (value === "" ? undefined : value),
     z.string().trim().toLowerCase().email().optional(),
   ),
+  TESTER_MODE_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(60_000).max(86_400_000).default(21_600_000),
 }).superRefine((configuration, context) => {
   const placeholderPattern = /replace-with|change-me|changeme/i;

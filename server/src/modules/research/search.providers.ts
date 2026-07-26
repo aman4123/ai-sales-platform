@@ -263,17 +263,24 @@ export function createSearchProvider(): SearchProvider | null {
 
 export function searchProviderConfiguration() {
   const provider = createSearchProvider();
+  const requiredEnvironmentVariable = {
+    TAVILY: "TAVILY_API_KEY",
+    BRAVE: "BRAVE_SEARCH_API_KEY",
+    SERPER: "SERPER_API_KEY",
+  }[env.SEARCH_PROVIDER];
   return provider
     ? {
         enabled: true,
         provider: provider.name,
         configured: true,
+        requiredEnvironmentVariable,
         message: "Verified search is configured. Paid searches still require confirmation.",
       }
     : {
         enabled: false,
         provider: env.SEARCH_PROVIDER,
         configured: false,
-        message: "Live search is not configured. Verified company research is unavailable.",
+        requiredEnvironmentVariable,
+        message: `${env.SEARCH_PROVIDER} live search is disabled. Configure ${requiredEnvironmentVariable}, enable SEARCH_ENABLED, and set a positive SEARCH_MONTHLY_REQUEST_LIMIT.`,
       };
 }

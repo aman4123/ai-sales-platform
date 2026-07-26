@@ -61,6 +61,9 @@ const authUser: AuthUser = {
   emailVerified: true,
   name: "Sales User",
   role: "MEMBER",
+  accountRole: "MEMBER",
+  accessMode: "USER",
+  availableModes: [],
   settings: {
     company: "Example Co",
     signature: "Sales User",
@@ -95,6 +98,7 @@ describe("primary application pages", () => {
       register: vi.fn(),
       logout: vi.fn(),
       acceptSession: vi.fn(),
+      switchMode: vi.fn(),
       updateUser: vi.fn(),
     });
     mockedGetLeadPage.mockResolvedValue({
@@ -126,6 +130,7 @@ describe("primary application pages", () => {
       enabled: true,
       configured: true,
       provider: "TAVILY",
+      requiredEnvironmentVariable: "TAVILY_API_KEY",
       message: "Verified search is configured.",
     });
     mockedCreateResearchJob.mockResolvedValue({
@@ -224,10 +229,11 @@ describe("primary application pages", () => {
       enabled: false,
       configured: false,
       provider: "TAVILY",
-      message: "Live search is not configured. Verified company research is unavailable.",
+      requiredEnvironmentVariable: "TAVILY_API_KEY",
+      message: "TAVILY live search is disabled. Configure TAVILY_API_KEY, enable SEARCH_ENABLED, and set a positive SEARCH_MONTHLY_REQUEST_LIMIT.",
     });
     withRouter(<Research />);
-    expect(await screen.findByText("Live search is not configured. Verified company research is unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText(/Configure TAVILY_API_KEY/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start verified research" })).toBeDisabled();
   });
 

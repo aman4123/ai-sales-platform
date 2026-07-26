@@ -5,6 +5,7 @@ import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import { connectRedisOrFallback, createRedisConnection } from "./lib/redis.js";
 import { startRetentionJob } from "./jobs/retention.js";
+import { ensureInitialMasterAccount } from "./modules/admin/admin.assignment.js";
 
 const configuredRedis = createRedisConnection();
 let server: Server | null = null;
@@ -64,6 +65,17 @@ process.on("uncaughtException", (error) => {
 
 try {
   await prisma.$connect();
+  if (env.INITIAL_ADMIN_EMAIL) {
+    const masterAccount = await ensureInitialMasterAccount(prisma, env.INITIAL_ADMIN_EMAIL);
+    logger.info(
+      {
+        status: masterAccount.status,
+        created: masterAccount.created,
+        emailFingerprint: masterAccount.emailFingerprint,
+      },
+      "Initial master account is ready",
+    );
+  }
   const activeRedis = await connectRedisOrFallback(configuredRedis);
 
   const app = createApp({ database: prisma, redis: activeRedis });

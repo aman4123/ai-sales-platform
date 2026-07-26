@@ -4,7 +4,7 @@ services:
     name: ai-sales-platform-free
     runtime: docker
     plan: free
-    branch: feature/free-tier-deployment
+    branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
     dockerCommand: /usr/local/bin/ai-sales-start
@@ -137,5 +137,7 @@ services:
         sync: false
       - key: INITIAL_ADMIN_EMAIL
         sync: false
+      - key: TESTER_MODE_ENABLED
+        value: "true"
       - key: MAINTENANCE_INTERVAL_MS
         value: 21600000

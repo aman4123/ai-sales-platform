@@ -1,0 +1,4 @@
+CREATE TYPE "AccessMode" AS ENUM ('USER', 'TESTER', 'MASTER_ADMIN');
+
+ALTER TABLE "RefreshSession"
+ADD COLUMN "accessMode" "AccessMode" NOT NULL DEFAULT 'USER';

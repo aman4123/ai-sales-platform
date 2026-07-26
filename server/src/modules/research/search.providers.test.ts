@@ -78,7 +78,8 @@ describe("search provider adapters", () => {
       enabled: false,
       provider: env.SEARCH_PROVIDER,
       configured: false,
-      message: "Live search is not configured. Verified company research is unavailable.",
+      requiredEnvironmentVariable: "TAVILY_API_KEY",
+      message: "TAVILY live search is disabled. Configure TAVILY_API_KEY, enable SEARCH_ENABLED, and set a positive SEARCH_MONTHLY_REQUEST_LIMIT.",
     });
     expect(JSON.stringify(searchProviderConfiguration())).not.toContain("test-key");
   });

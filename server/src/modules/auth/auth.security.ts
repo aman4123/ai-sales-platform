@@ -6,10 +6,15 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import {
+  availableAccessModes,
+  defaultAccessMode,
+  effectiveRole,
   hashToken,
   signAccessToken,
   signRefreshToken,
-  type AuthenticatedUser,
+  type AccessMode,
+  type AccountUser,
+  type UserRole,
 } from "./auth.tokens.js";
 
 export const REFRESH_COOKIE = "refresh_token";
@@ -63,7 +68,7 @@ export interface UserWithSettings {
   emailVerifiedAt?: Date | null;
   passwordHash: string;
   name: string;
-  role: AuthenticatedUser["role"];
+  role: UserRole;
   settings: {
     company: string;
     signature: string;
@@ -82,14 +87,24 @@ export interface UserWithSettings {
   } | null;
 }
 
-export function serializeUser(user: UserWithSettings) {
+export function serializeUser(
+  user: UserWithSettings,
+  requestedMode: AccessMode = defaultAccessMode(user.role),
+) {
   const settings = user.settings;
+  const availableModes = availableAccessModes(user.role);
+  const accessMode = availableModes.includes(requestedMode)
+    ? requestedMode
+    : defaultAccessMode(user.role);
   return {
     id: user.id,
     email: user.email,
     emailVerified: user.emailVerifiedAt !== null,
     name: user.name,
-    role: user.role,
+    role: effectiveRole(user.role, accessMode),
+    accountRole: user.role,
+    accessMode,
+    availableModes,
     settings: {
       company: settings?.company ?? "",
       signature: settings?.signature ?? "",
@@ -117,17 +132,22 @@ export function sessionMetadata(request: Request) {
   };
 }
 
-export function authUser(user: UserWithSettings): AuthenticatedUser {
+export function authUser(user: UserWithSettings): AccountUser {
   return { id: user.id, email: user.email, role: user.role };
 }
 
 export async function createSession(
   database: DatabaseClient,
-  user: AuthenticatedUser,
+  user: AccountUser,
   metadata: ReturnType<typeof sessionMetadata>,
+  requestedMode: AccessMode = defaultAccessMode(user.role),
 ) {
   const sessionId = randomUUID();
   const refreshToken = signRefreshToken(user.id, sessionId);
+  const availableModes = availableAccessModes(user.role);
+  const accessMode = availableModes.includes(requestedMode)
+    ? requestedMode
+    : defaultAccessMode(user.role);
 
   await database.refreshSession.deleteMany({
     where: { userId: user.id, expiresAt: { lt: new Date() } },
@@ -136,13 +156,14 @@ export async function createSession(
     data: {
       id: sessionId,
       userId: user.id,
+      accessMode,
       tokenHash: hashToken(refreshToken),
       expiresAt: new Date(Date.now() + env.JWT_REFRESH_TTL_SECONDS * 1_000),
       ...metadata,
     },
   });
 
-  return { accessToken: signAccessToken(user), refreshToken };
+  return { accessToken: signAccessToken(user, sessionId, accessMode), refreshToken, accessMode };
 }
 
 export function createOpaqueToken() {

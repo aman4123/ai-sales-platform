@@ -34,7 +34,8 @@ export async function registerAndOpenDashboard(page: Page, email: string, name =
   await page.getByLabel("Password").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: "Register" }).click();
 
-  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Login" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Account created");
   await page.getByRole("link", { name: "Open development verification link" }).click();
   await expect(page.getByRole("heading", { name: "Verify your email" })).toBeVisible();
   await page.getByRole("button", { name: "Verify email" }).click();

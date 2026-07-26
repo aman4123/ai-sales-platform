@@ -38,6 +38,9 @@ describe("application layout", () => {
         emailVerified: true,
         name: "Sales User",
         role: "MEMBER",
+        accountRole: "MEMBER",
+        accessMode: "USER",
+        availableModes: [],
         settings: {
           company: "Example",
           signature: "",
@@ -51,6 +54,7 @@ describe("application layout", () => {
       register: vi.fn(),
       logout,
       acceptSession: vi.fn(),
+      switchMode: vi.fn(),
       updateUser: vi.fn(),
     });
   });

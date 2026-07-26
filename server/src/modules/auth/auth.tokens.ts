@@ -4,16 +4,28 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { UnauthorizedError } from "../../lib/errors.js";
 
-export interface AuthenticatedUser {
+export type UserRole = "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
+export type AccessMode = "USER" | "TESTER" | "MASTER_ADMIN";
+
+export interface AccountUser {
   id: string;
   email: string;
-  role: "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
+  role: UserRole;
+}
+
+export interface AuthenticatedUser extends AccountUser {
+  accountRole: UserRole;
+  accessMode: AccessMode;
+  sessionId?: string;
 }
 
 const accessPayloadSchema = z.object({
   sub: z.string().min(1),
   email: z.string().email(),
   role: z.enum(["ADMIN", "MEMBER", "USER", "SUPER_ADMIN"]),
+  accountRole: z.enum(["ADMIN", "MEMBER", "USER", "SUPER_ADMIN"]).optional(),
+  accessMode: z.enum(["USER", "TESTER", "MASTER_ADMIN"]).optional(),
+  sid: z.string().min(1).optional(),
   type: z.literal("access"),
 });
 
@@ -23,9 +35,45 @@ const refreshPayloadSchema = z.object({
   type: z.literal("refresh"),
 });
 
-export function signAccessToken(user: AuthenticatedUser): string {
+export function testerModesEnabled() {
+  return env.NODE_ENV !== "production" || env.TESTER_MODE_ENABLED;
+}
+
+export function defaultAccessMode(role: UserRole): AccessMode {
+  return role === "SUPER_ADMIN" ? "MASTER_ADMIN" : "USER";
+}
+
+export function availableAccessModes(role: UserRole): AccessMode[] {
+  if (role !== "SUPER_ADMIN") return [];
+  return testerModesEnabled()
+    ? ["USER", "TESTER", "MASTER_ADMIN"]
+    : ["MASTER_ADMIN"];
+}
+
+export function effectiveRole(role: UserRole, accessMode: AccessMode): UserRole {
+  if (role !== "SUPER_ADMIN") return role;
+  if (accessMode === "USER") return "USER";
+  if (accessMode === "TESTER") return "ADMIN";
+  return "SUPER_ADMIN";
+}
+
+export function signAccessToken(
+  user: AccountUser,
+  sessionId?: string,
+  requestedMode: AccessMode = defaultAccessMode(user.role),
+): string {
+  const accessMode = availableAccessModes(user.role).includes(requestedMode)
+    ? requestedMode
+    : defaultAccessMode(user.role);
   return jwt.sign(
-    { email: user.email, role: user.role, type: "access" },
+    {
+      email: user.email,
+      role: effectiveRole(user.role, accessMode),
+      accountRole: user.role,
+      accessMode,
+      ...(sessionId ? { sid: sessionId } : {}),
+      type: "access",
+    },
     env.JWT_ACCESS_SECRET,
     {
       subject: user.id,
@@ -58,7 +106,19 @@ export function verifyAccessToken(token: string): AuthenticatedUser {
       }),
     );
 
-    return { id: payload.sub, email: payload.email, role: payload.role };
+    const accountRole = payload.accountRole ?? payload.role;
+    const requestedMode = payload.accessMode ?? defaultAccessMode(accountRole);
+    const accessMode = availableAccessModes(accountRole).includes(requestedMode)
+      ? requestedMode
+      : defaultAccessMode(accountRole);
+    return {
+      id: payload.sub,
+      email: payload.email,
+      role: effectiveRole(accountRole, accessMode),
+      accountRole,
+      accessMode,
+      ...(payload.sid ? { sessionId: payload.sid } : {}),
+    };
   } catch {
     throw new UnauthorizedError("The access token is invalid or expired.");
   }

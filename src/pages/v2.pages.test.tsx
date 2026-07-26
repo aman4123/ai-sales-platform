@@ -26,6 +26,21 @@ import Legal from "./Legal";
 import Tasks from "./Tasks";
 
 vi.mock("../components/layout/Layout", () => ({ default: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
+vi.mock("../contexts/auth-context", () => ({
+  useAuth: () => ({
+    user: {
+      id: "master-1",
+      email: "master@example.com",
+      emailVerified: true,
+      name: "Master Tester",
+      role: "SUPER_ADMIN",
+      accountRole: "SUPER_ADMIN",
+      accessMode: "MASTER_ADMIN",
+      availableModes: ["USER", "TESTER", "MASTER_ADMIN"],
+      settings: { company: "", signature: "", aiProvider: "MOCK", theme: "DARK", notifications: true },
+    },
+  }),
+}));
 vi.mock("../services/api", () => ({ api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }, apiErrorMessage: (_error: unknown, fallback: string) => fallback }));
 vi.mock("../services/leadStorage", () => ({ getLeadPage: vi.fn() }));
 vi.mock("../services/v2", () => ({

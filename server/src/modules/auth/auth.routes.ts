@@ -10,11 +10,14 @@ import type { DatabaseClient } from "../../lib/prisma.js";
 import { requireAuth } from "../../middleware/auth.js";
 import type { RequestRateLimiters } from "../../middleware/request-security.js";
 import {
+  availableAccessModes,
+  defaultAccessMode,
   hashToken,
   signAccessToken,
   signRefreshToken,
   tokenHashesMatch,
   verifyRefreshToken,
+  type AccessMode,
 } from "./auth.tokens.js";
 import {
   DUMMY_PASSWORD_HASH,
@@ -54,6 +57,7 @@ const recoverSchema = z.object({
   password: passwordSchema,
 });
 const regenerateCodesSchema = z.object({ password: z.string().min(1).max(128) });
+const accessModeSchema = z.object({ mode: z.enum(["USER", "TESTER", "MASTER_ADMIN"]) });
 
 const genericEmailResponse = {
   message: "If an eligible account exists, an email will arrive shortly.",
@@ -254,7 +258,7 @@ export function createAuthRouter(
     response.cookie(REFRESH_COOKIE, tokens.refreshToken, cookieOptions);
     response.json({
       data: {
-        user: serializeUser(user),
+        user: serializeUser(user, tokens.accessMode),
         accessToken: tokens.accessToken,
         recoveryCodes,
       },
@@ -278,7 +282,63 @@ export function createAuthRouter(
 
     const tokens = await createSession(database, authUser(user), sessionMetadata(request));
     response.cookie(REFRESH_COOKIE, tokens.refreshToken, cookieOptions);
-    response.json({ data: { user: serializeUser(user), accessToken: tokens.accessToken } });
+    response.json({
+      data: { user: serializeUser(user, tokens.accessMode), accessToken: tokens.accessToken },
+    });
+  });
+
+  router.post("/mode", requireAuth, async (request, response) => {
+    const { mode } = accessModeSchema.parse(request.body);
+    const authenticated = request.user!;
+    if (authenticated.accountRole !== "SUPER_ADMIN") {
+      throw new AppError(403, "MASTER_ADMIN_REQUIRED", "Master Admin access is required.");
+    }
+    if (!availableAccessModes(authenticated.accountRole).includes(mode)) {
+      throw new AppError(
+        403,
+        "TESTER_MODE_DISABLED",
+        "Tester Mode is disabled for this environment.",
+      );
+    }
+    if (!authenticated.sessionId) {
+      throw new UnauthorizedError("Sign in again before changing the access mode.");
+    }
+
+    const updated = await database.refreshSession.updateMany({
+      where: {
+        id: authenticated.sessionId,
+        userId: authenticated.id,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      data: { accessMode: mode },
+    });
+    if (updated.count !== 1) {
+      throw new UnauthorizedError("The active session is no longer available.");
+    }
+    const user = await database.user.findUnique({
+      where: { id: authenticated.id },
+      include: { settings: true },
+    });
+    if (!user || user.emailVerifiedAt === null || user.role !== "SUPER_ADMIN") {
+      throw new UnauthorizedError("The Master Admin account is no longer available.");
+    }
+    await database.auditLog.create({
+      data: {
+        actorUserId: user.id,
+        action: "ACCESS_MODE_CHANGED",
+        resourceType: "RefreshSession",
+        resourceId: authenticated.sessionId,
+        requestId: request.id,
+        metadata: { mode },
+      },
+    });
+    response.json({
+      data: {
+        user: serializeUser(user, mode),
+        accessToken: signAccessToken(authUser(user), authenticated.sessionId, mode),
+      },
+    });
   });
 
   router.post("/password-reset/request", rateLimiters.auth, async (request, response) => {
@@ -460,6 +520,11 @@ export function createAuthRouter(
 
     const nextSessionId = randomUUID();
     const nextRefreshToken = signRefreshToken(session.userId, nextSessionId);
+    const user = session.user as UserWithSettings;
+    const storedAccessMode = session.accessMode as AccessMode | undefined;
+    const nextAccessMode = availableAccessModes(user.role).includes(storedAccessMode ?? "USER")
+      ? storedAccessMode!
+      : defaultAccessMode(user.role);
     const now = new Date();
     const rotated = await database.$transaction(async (transaction) => {
       const revoked = await transaction.refreshSession.updateMany({
@@ -471,6 +536,7 @@ export function createAuthRouter(
         data: {
           id: nextSessionId,
           userId: session.userId,
+          accessMode: nextAccessMode,
           tokenHash: hashToken(nextRefreshToken),
           expiresAt: new Date(Date.now() + env.JWT_REFRESH_TTL_SECONDS * 1_000),
           ...sessionMetadata(request),
@@ -493,10 +559,12 @@ export function createAuthRouter(
       throw new UnauthorizedError("Refresh token reuse was detected. Please sign in again.");
     }
 
-    const user = session.user as UserWithSettings;
     response.cookie(REFRESH_COOKIE, nextRefreshToken, cookieOptions);
     response.json({
-      data: { user: serializeUser(user), accessToken: signAccessToken(authUser(user)) },
+      data: {
+        user: serializeUser(user, nextAccessMode),
+        accessToken: signAccessToken(authUser(user), nextSessionId, nextAccessMode),
+      },
     });
   });
 
@@ -530,7 +598,7 @@ export function createAuthRouter(
     if (!user || user.emailVerifiedAt === null) {
       throw new UnauthorizedError("The authenticated account no longer exists.");
     }
-    response.json({ data: { user: serializeUser(user) } });
+    response.json({ data: { user: serializeUser(user, request.user!.accessMode) } });
   });
 
   return router;

@@ -34,6 +34,7 @@ describe("authentication form", () => {
       register,
       logout: vi.fn(),
       acceptSession: vi.fn(),
+      switchMode: vi.fn(),
       updateUser: vi.fn(),
     });
   });
@@ -67,7 +68,8 @@ describe("authentication form", () => {
     await user.click(screen.getByRole("button", { name: "Register" }));
 
     expect(register).toHaveBeenCalledWith("Sales Admin", "admin@example.com", "safe-password");
-    expect(await screen.findByRole("heading", { name: "Check your email" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Account created for admin@example.com");
     expect(screen.getByRole("link", { name: "Open development verification link" })).toHaveAttribute(
       "href",
       "/verify-email?token=verification-token",

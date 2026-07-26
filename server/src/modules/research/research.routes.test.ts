@@ -12,7 +12,7 @@ function appFor(database: DatabaseClient, redis: RedisClient | null) {
   app.use(express.json());
   app.use((req, _res, next) => {
     req.id = "request-1";
-    req.user = { id: "user-1", email: "user@example.com", role: "USER" };
+    req.user = { id: "user-1", email: "user@example.com", role: "USER", accountRole: "USER", accessMode: "USER" };
     next();
   });
   app.use(createResearchRouter(database, redis));
@@ -75,7 +75,11 @@ describe("research routes", () => {
     const { database, redis } = fixture();
     const app = appFor(database, redis);
     const status = await request(app).get("/status");
-    expect(status.body.data.message).toBe("Live search is not configured. Verified company research is unavailable.");
+    expect(status.body.data).toMatchObject({
+      provider: "TAVILY",
+      requiredEnvironmentVariable: "TAVILY_API_KEY",
+      message: "TAVILY live search is disabled. Configure TAVILY_API_KEY, enable SEARCH_ENABLED, and set a positive SEARCH_MONTHLY_REQUEST_LIMIT.",
+    });
     expect((await request(app).post("/jobs").send({ query: "logistics India", targetType: "COMPANY" })).status).toBe(409);
     expect((await request(app).post("/jobs").send({ query: "logistics India", targetType: "COMPANY", confirmPaidSearch: true })).status).toBe(503);
   });

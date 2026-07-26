@@ -408,7 +408,7 @@ test("renders safe not-found, mobile navigation, responsive pages, refresh persi
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/dashboard");
-    await expect(page.getByRole("heading", { name: /Welcome Back/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Welcome back/ })).toBeVisible();
     expect(await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(true);
     if (viewport.width < 1024) {
       await page.getByRole("button", { name: "Open navigation" }).click();

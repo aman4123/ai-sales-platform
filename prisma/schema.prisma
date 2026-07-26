@@ -16,6 +16,12 @@ enum UserRole {
   SUPER_ADMIN
 }
 
+enum AccessMode {
+  USER
+  TESTER
+  MASTER_ADMIN
+}
+
 enum ResearchTargetType {
   COMPANY
   MARKET
@@ -232,6 +238,7 @@ model RefreshSession {
   id         String    @id @default(cuid())
   tokenHash  String    @unique
   userId     String
+  accessMode AccessMode @default(USER)
   userAgent  String?
   ipAddress  String?
   expiresAt  DateTime

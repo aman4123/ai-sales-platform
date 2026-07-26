@@ -1,5 +1,7 @@
 export type AiProvider = "MOCK" | "GROQ";
 export type Theme = "DARK" | "LIGHT" | "SYSTEM";
+export type AccessMode = "USER" | "TESTER" | "MASTER_ADMIN";
+export type UserRole = "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
 
 export interface UserSettings {
   company: string;
@@ -23,7 +25,10 @@ export interface AuthUser {
   email: string;
   emailVerified: boolean;
   name: string;
-  role: "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
+  role: UserRole;
+  accountRole: UserRole;
+  accessMode: AccessMode;
+  availableModes: AccessMode[];
   settings: UserSettings;
 }
 

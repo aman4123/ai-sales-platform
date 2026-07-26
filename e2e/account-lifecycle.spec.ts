@@ -11,12 +11,12 @@ test("registers, verifies email, preserves the session, and passes a dashboard a
 
   const email = uniqueEmail("account", test.info().project.name);
   await registerAndOpenDashboard(page, email);
-  await expect(page.getByRole("heading", { name: /Welcome Back/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Welcome back/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Open profile" })).toBeVisible();
 
   await page.reload();
   await expect(page).toHaveURL(/\/dashboard$/);
-  await expect(page.getByRole("heading", { name: /Welcome Back/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Welcome back/ })).toBeVisible();
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);
