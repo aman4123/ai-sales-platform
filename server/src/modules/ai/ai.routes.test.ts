@@ -68,7 +68,7 @@ describe("Groq AI routes", () => {
       data: expect.objectContaining({ provider: "GROQ", type: "RESEARCH" }),
     });
     const providerRequest = fetchMock.mock.calls[0]![1] as RequestInit;
-    expect(JSON.parse(providerRequest.body as string)).toMatchObject({ temperature: 0.3 });
+    expect(JSON.parse(providerRequest.body as string)).toMatchObject({ temperature: 0.2 });
   });
 
   it("generates a varied Groq-powered sales email", async () => {
@@ -94,10 +94,12 @@ describe("Groq AI routes", () => {
       data: expect.objectContaining({
         provider: "GROQ",
         type: "EMAIL",
-        prompt: expect.stringContaining("fresh, specific"),
+        prompt: expect.stringContaining(
+          "Create a friendly B2B sales email using only the information below.",
+        ),
       }),
     });
     const providerRequest = fetchMock.mock.calls[0]![1] as RequestInit;
-    expect(JSON.parse(providerRequest.body as string)).toMatchObject({ temperature: 0.8 });
+    expect(JSON.parse(providerRequest.body as string)).toMatchObject({ temperature: 0.6 });
   });
 });
