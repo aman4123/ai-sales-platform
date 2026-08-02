@@ -1,7 +1,7 @@
 export type AiProvider = "MOCK" | "GROQ";
 export type Theme = "DARK" | "LIGHT" | "SYSTEM";
 export type AccessMode = "USER" | "TESTER" | "MASTER_ADMIN";
-export type UserRole = "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
+export type UserRole = "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN" | "MASTER_ADMIN";
 
 export interface UserSettings {
   company: string;
@@ -29,6 +29,13 @@ export interface AuthUser {
   accountRole: UserRole;
   accessMode: AccessMode;
   availableModes: AccessMode[];
+  tenant?: {
+    id: string;
+    name: string;
+    status: "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+    kind: "CUSTOMER" | "INTERNAL" | "TEST";
+    role: "TENANT_ADMIN" | "SALES_MANAGER" | "SALES_USER" | "REVIEWER" | "BILLING_ADMIN" | "VIEWER";
+  } | null;
   settings: UserSettings;
 }
 

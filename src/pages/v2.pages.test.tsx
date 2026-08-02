@@ -1,19 +1,31 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import toast from "react-hot-toast";
 import { api } from "../services/api";
 import { getLeadPage } from "../services/leadStorage";
 import {
   confirmSalesGoal,
+  cancelAdminJob,
   createCampaign,
+  createAdminUser,
+  createSupportSession,
   createSalesGoal,
   getAdminOverview,
+  getAdminJobs,
+  getAdminSystem,
+  getAdminTenants,
+  getAdminUsers,
   getAnalytics,
   getCampaigns,
   getCommandOverview,
   getInbox,
   getTasks,
+  retryAdminJob,
+  revokeAdminUserSessions,
+  updateAdminUser,
+  updateTenantAiBudget,
   updateTask,
 } from "../services/v2";
 import Admin from "./Admin";
@@ -41,18 +53,29 @@ vi.mock("../contexts/auth-context", () => ({
     },
   }),
 }));
-vi.mock("../services/api", () => ({ api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }, apiErrorMessage: (_error: unknown, fallback: string) => fallback }));
+vi.mock("../services/api", () => ({ api: { get: vi.fn(), post: vi.fn(), put: vi.fn() }, apiErrorMessage: (_error: unknown, fallback: string) => fallback, setSupportContext: vi.fn() }));
 vi.mock("../services/leadStorage", () => ({ getLeadPage: vi.fn() }));
 vi.mock("../services/v2", () => ({
+  cancelAdminJob: vi.fn(),
   confirmSalesGoal: vi.fn(),
+  createAdminUser: vi.fn(),
   createCampaign: vi.fn(),
+  createSupportSession: vi.fn(),
   createSalesGoal: vi.fn(),
   getAdminOverview: vi.fn(),
+  getAdminJobs: vi.fn(),
+  getAdminSystem: vi.fn(),
+  getAdminTenants: vi.fn(),
+  getAdminUsers: vi.fn(),
   getAnalytics: vi.fn(),
   getCampaigns: vi.fn(),
   getCommandOverview: vi.fn(),
   getInbox: vi.fn(),
   getTasks: vi.fn(),
+  retryAdminJob: vi.fn(),
+  revokeAdminUserSessions: vi.fn(),
+  updateAdminUser: vi.fn(),
+  updateTenantAiBudget: vi.fn(),
   updateTask: vi.fn(),
 }));
 vi.mock("react-hot-toast", () => ({ default: { success: vi.fn(), error: vi.fn() } }));
@@ -73,9 +96,14 @@ function withRouter(node: React.ReactNode, path = "/") { return render(<MemoryRo
 
 describe("V2 product workspaces", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.mocked(getLeadPage).mockResolvedValue({ leads: [lead], total: 1, nextCursor: null });
     vi.mocked(getCampaigns).mockResolvedValue([campaign]);
+    vi.mocked(getAdminUsers).mockResolvedValue([]);
+    vi.mocked(getAdminTenants).mockResolvedValue([]);
+    vi.mocked(getAdminJobs).mockResolvedValue([]);
+    vi.mocked(getAdminSystem).mockResolvedValue({ database: "UP", redis: "UP", webService: "UP", worker: "IN_PROCESS_BOUNDED", deploymentVersion: "test-revision", providers: { ai: { configured: false, model: "test" }, search: { enabled: false, configured: false, provider: "TAVILY", requiredEnvironmentVariable: "TAVILY_API_KEY", message: "Not configured" }, email: { enabled: false, mode: "disabled", provider: "log" } }, jobs: {}, salesDepartments: {} });
     mockApiGet();
     vi.mocked(api.post).mockResolvedValue({ data: { data: { created: 1, skipped: [] } } });
     vi.mocked(api.put).mockResolvedValue({ data: { data: {} } });
@@ -198,6 +226,74 @@ describe("V2 product workspaces", () => {
     admin.unmount();
     withRouter(<Legal />, "/unsupported-legal-page");
     expect(screen.getByRole("heading", { name: "Terms of use" })).toBeInTheDocument();
+  });
+
+  it("operates master user, tenant budget, session, and bounded job controls", async () => {
+    const user = userEvent.setup();
+    const adminUsers = [
+      { id: "user-active", name: "Active User", email: "active@example.com", emailVerifiedAt: new Date().toISOString(), role: "MEMBER", status: "ACTIVE" as const, lastLoginAt: new Date().toISOString(), lastActiveAt: new Date().toISOString(), createdAt: new Date().toISOString(), tenantMemberships: [{ role: "SALES_USER", tenant: { id: "tenant-active", name: "Active Company", slug: "active", status: "ACTIVE" } }], _count: { sessions: 1, aiRequests: 2, campaigns: 1 } },
+      { id: "user-suspended", name: "Suspended User", email: "suspended@example.com", emailVerifiedAt: null, role: "MEMBER", status: "SUSPENDED" as const, lastLoginAt: null, lastActiveAt: null, createdAt: new Date().toISOString(), tenantMemberships: [], _count: { sessions: 0, aiRequests: 0, campaigns: 0 } },
+    ];
+    const adminTenants = [
+      { id: "tenant-active", name: "Active Company", slug: "active", status: "ACTIVE" as const, kind: "CUSTOMER" as const, owner: { id: "user-active", name: "Active User", email: "active@example.com" }, subscription: { id: "sub-1", status: "ACTIVE", plan: { code: "FREE_TRIAL", name: "Free Trial" } }, aiBudget: { id: "budget-1", mode: "LIMITED" as const, monthlyRequestLimit: 10, warningThresholdPercent: 80 }, companyProfile: { status: "APPROVED", version: 1, companyName: "Active Company", updatedAt: new Date().toISOString() }, _count: { memberships: 1, dailyBriefs: 1 } },
+      { id: "tenant-archived", name: "Archived Company", slug: "archived", status: "ARCHIVED" as const, kind: "CUSTOMER" as const, owner: null, subscription: null, aiBudget: null, companyProfile: null, _count: { memberships: 0, dailyBriefs: 0 } },
+    ];
+    const jobs = [
+      { id: "job-failed", tenantId: "tenant-active", category: "LEAD_DISCOVERY", status: "FAILED", attemptCount: 2, maxAttempts: 3, scheduledAt: new Date().toISOString(), nextAttemptAt: null, errorCode: "PROVIDER_FAILURE", errorMessage: "redacted", createdAt: new Date().toISOString() },
+      { id: "job-pending", tenantId: "tenant-active", category: "DAILY_BRIEF", status: "PENDING", attemptCount: 0, maxAttempts: 3, scheduledAt: new Date().toISOString(), nextAttemptAt: null, errorCode: null, errorMessage: null, createdAt: new Date().toISOString() },
+      { id: "job-complete", tenantId: "tenant-active", category: "ANALYTICS_REFRESH", status: "COMPLETED", attemptCount: 1, maxAttempts: 3, scheduledAt: new Date().toISOString(), nextAttemptAt: null, errorCode: null, errorMessage: null, createdAt: new Date().toISOString() },
+    ];
+    vi.mocked(getAdminOverview).mockResolvedValue({ users: 2, activeUsers: 1, aiRequests: 2, searchRequests: 3, emailSends: 0, failedJobs: 1, providerHealth: { search: { enabled: true, configured: true, provider: "TAVILY", message: "Configured" }, ai: { provider: "GROQ", configured: true }, email: { provider: "resend", outboundEnabled: false } }, monthlyBudget: { aiRequests: 10, searchRequests: 5, outboundDailyLimit: 0 }, abuseFlags: 1, campaignActivity: {}, auditLogs: [{ id: "audit-null", actorUserId: null, action: "ADMIN_VIEWED", resourceType: "System", resourceId: null, requestId: null, createdAt: new Date().toISOString() }] });
+    vi.mocked(getAdminUsers).mockResolvedValue(adminUsers);
+    vi.mocked(getAdminTenants).mockResolvedValue(adminTenants);
+    vi.mocked(getAdminJobs).mockResolvedValue(jobs);
+    vi.mocked(createAdminUser).mockResolvedValue({ user: { id: "new-user", name: "New User", email: "new@example.com", status: "ACTIVE" }, invitationDelivered: false });
+    vi.mocked(revokeAdminUserSessions).mockResolvedValue(1);
+    vi.mocked(createSupportSession).mockRejectedValue(new Error("support unavailable"));
+    vi.mocked(updateTenantAiBudget).mockResolvedValue(adminTenants[0].aiBudget);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const prompt = vi.spyOn(window, "prompt").mockReturnValue("Approved operator reason");
+
+    withRouter(<Admin />);
+    expect(await screen.findByText("Active User")).toBeInTheDocument();
+    expect(screen.getByText("Suspended User")).toBeInTheDocument();
+    expect(screen.getByText("Unverified")).toBeInTheDocument();
+    expect(screen.getByText("No plan · 0 user(s) · ARCHIVED")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Name"), "New User");
+    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await user.selectOptions(screen.getByLabelText("Company workspace"), "tenant-active");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(createAdminUser).toHaveBeenCalledWith({ name: "New User", email: "new@example.com", tenantId: "tenant-active" }));
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining("Email delivery is unavailable"));
+
+    await user.click(screen.getAllByRole("button", { name: "Suspend" })[0]);
+    await waitFor(() => expect(updateAdminUser).toHaveBeenCalledWith("user-active", { status: "SUSPENDED" }));
+    await user.click(screen.getByRole("button", { name: "Reactivate" }));
+    await waitFor(() => expect(updateAdminUser).toHaveBeenCalledWith("user-suspended", { status: "ACTIVE" }));
+    await user.click(screen.getAllByRole("button", { name: "Revoke sessions" })[0]);
+    await waitFor(() => expect(revokeAdminUserSessions).toHaveBeenCalledWith("user-active", "Master Admin security action"));
+    await user.click(screen.getAllByRole("button", { name: "View as user" })[1]);
+    expect(toast.error).toHaveBeenCalledWith("This user is not assigned to a company workspace.");
+    await user.click(screen.getAllByRole("button", { name: "View as user" })[0]);
+    await waitFor(() => expect(createSupportSession).toHaveBeenCalledWith(expect.objectContaining({ targetUserId: "user-active", accessLevel: "READ_ONLY" })));
+
+    const modes = screen.getAllByLabelText("AI mode");
+    const limits = screen.getAllByLabelText("Monthly requests");
+    fireEvent.change(modes[0], { target: { value: "LIMITED" } });
+    fireEvent.change(limits[0], { target: { value: "25" } });
+    await user.click(screen.getAllByRole("button", { name: "Save budget" })[0]);
+    await waitFor(() => expect(updateTenantAiBudget).toHaveBeenCalledWith("tenant-active", expect.objectContaining({ mode: "LIMITED", monthlyRequestLimit: 25 })));
+    fireEvent.change(modes[1], { target: { value: "INTERNAL_UNLIMITED" } });
+    await user.click(screen.getAllByRole("button", { name: "Save budget" })[1]);
+    await waitFor(() => expect(updateTenantAiBudget).toHaveBeenCalledWith("tenant-archived", expect.objectContaining({ mode: "INTERNAL_UNLIMITED", monthlyRequestLimit: 0 })));
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(retryAdminJob).toHaveBeenCalledWith("job-failed", "Approved operator reason"));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(cancelAdminJob).toHaveBeenCalledWith("job-pending", "Approved operator reason"));
+    expect(confirm).toHaveBeenCalled();
+    expect(prompt).toHaveBeenCalled();
   });
 
   it("renders honest empty states without synthetic records", async () => {

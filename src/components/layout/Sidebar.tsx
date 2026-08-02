@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
   Bot,
+  Building2,
   ClipboardList,
   Command,
   ContactRound,
@@ -18,9 +19,11 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "../../contexts/auth-context";
+import { getSupportContext } from "../../services/api";
 
 const menu = [
   { name: "Overview", icon: LayoutDashboard, path: "/dashboard" },
+  { name: "Company Setup", icon: Building2, path: "/company-setup" },
   { name: "Command Center", icon: Command, path: "/command" },
   { name: "Research", icon: Search, path: "/research" },
   { name: "Leads", icon: ContactRound, path: "/leads" },
@@ -49,7 +52,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
       && window.matchMedia("(min-width: 64rem)").matches,
   );
   const visible = open || desktop;
-  const navigationItems = user?.role === "ADMIN" || user?.role === "SUPER_ADMIN"
+  const supportMode = getSupportContext();
+  const navigationItems = !supportMode && (user?.role === "ADMIN" || user?.role === "SUPER_ADMIN" || user?.role === "MASTER_ADMIN")
     ? [...menu, { name: "Admin", icon: ShieldCheck, path: "/admin" }]
     : menu;
 
@@ -122,8 +126,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-300 font-black text-slate-950">AS</span>
             <div>
-              <h1 className="font-bold tracking-tight text-white">AI Sales Platform</h1>
-              <p className="mt-0.5 text-xs text-slate-400">Human-approved sales OS</p>
+              <h1 className="font-bold tracking-tight text-white">AI Sales Department</h1>
+              <p className="mt-0.5 text-xs text-slate-400">Bounded autonomous sales operations</p>
             </div>
           </div>
           <button

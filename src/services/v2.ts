@@ -270,3 +270,407 @@ export async function getAdminOverview(signal?: AbortSignal) {
   const response = await api.get<{ data: AdminOverview }>("/admin/overview", { signal });
   return response.data.data;
 }
+
+export interface CompanyProfile {
+  id?: string;
+  tenantId: string;
+  status: "DRAFT" | "APPROVED";
+  version: number;
+  companyName: string;
+  website: string | null;
+  industry: string | null;
+  description: string | null;
+  products: string[];
+  services: string[];
+  useCases: string[];
+  pricingSummary: string | null;
+  targetIndustries: string[];
+  targetCompanySizes: string[];
+  targetJobTitles: string[];
+  targetLocations: string[];
+  exclusions: string[];
+  valuePropositions: string[];
+  competitors: string[];
+  caseStudies: Array<{ title: string; summary: string; sourceUrl?: string }>;
+  testimonials: Array<{ quote: string; attribution: string; sourceUrl?: string }>;
+  faqs: Array<{ question: string; answer: string }>;
+  commonObjections: Array<{ objection: string; approvedResponse: string }>;
+  knowledgeSources: Array<{
+    title: string;
+    url: string;
+    type: "WEBSITE" | "DOCUMENT" | "CASE_STUDY" | "FAQ" | "OTHER";
+  }>;
+  preferredTone: "Professional" | "Friendly" | "Formal" | "Concise" | "Consultative";
+  complianceRequirements: string[];
+  contactDetails: { email: string; phone: string; address: string };
+  meetingPreferences: { timezone: string; schedulingUrl: string; assignedCloser: string };
+  approvedAt: string | null;
+  updatedAt: string | null;
+}
+
+export type CompanyProfileInput = Omit<
+  CompanyProfile,
+  "id" | "tenantId" | "status" | "version" | "approvedAt" | "updatedAt"
+>;
+
+export async function getCompanyProfile(signal?: AbortSignal) {
+  const response = await api.get<{ data: { profile: CompanyProfile } }>(
+    "/settings/company-profile",
+    { signal },
+  );
+  return response.data.data.profile;
+}
+
+export async function updateCompanyProfile(input: CompanyProfileInput) {
+  const response = await api.put<{ data: { profile: CompanyProfile } }>(
+    "/settings/company-profile",
+    input,
+  );
+  return response.data.data.profile;
+}
+
+export async function approveCompanyProfile() {
+  const response = await api.post<{ data: { profile: CompanyProfile } }>(
+    "/settings/company-profile/approve",
+    { confirm: true },
+  );
+  return response.data.data.profile;
+}
+
+export interface DailySalesBrief {
+  id: string;
+  briefDate: string;
+  generatedAt: string;
+  dataLabel: "REAL" | "TEST" | "ESTIMATED" | "PROJECTED" | "DEMO";
+  metrics: {
+    leadsDiscovered: number;
+    researchCompleted: number;
+    qualifiedLeads: number;
+    outreachSent: number;
+    repliesReceived: number;
+    interestedProspects: number;
+    meetings: number;
+    opportunitiesCreated: number;
+    pipelineValue: number;
+    deliveriesConfirmed: number;
+    wonCustomers: number;
+    revenue: number;
+    revenueCurrency: string;
+    aiRequests: number;
+    searchRequestsRecorded: number;
+    estimatedAiCostMinor: number;
+    externalProviderCostsAvailable: boolean;
+  };
+  failures: string[];
+  risks: string[];
+  approvals: string[];
+  priorities: string[];
+}
+
+export async function getDailySalesBrief(signal?: AbortSignal) {
+  const response = await api.get<{ data: { brief: DailySalesBrief } }>(
+    "/operations/daily-brief",
+    { signal },
+  );
+  return response.data.data.brief;
+}
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  emailVerifiedAt: string | null;
+  role: string;
+  status: "ACTIVE" | "SUSPENDED" | "DELETED";
+  lastLoginAt: string | null;
+  lastActiveAt: string | null;
+  createdAt: string;
+  tenantMemberships: Array<{
+    role: string;
+    tenant: { id: string; name: string; slug: string; status: string };
+  }>;
+  _count: { sessions: number; aiRequests: number; campaigns: number };
+}
+
+export interface AdminTenant {
+  id: string;
+  name: string;
+  slug: string;
+  status: "ACTIVE" | "SUSPENDED" | "ARCHIVED";
+  kind: "CUSTOMER" | "INTERNAL" | "TEST";
+  owner: { id: string; name: string; email: string } | null;
+  subscription: {
+    id: string;
+    status: string;
+    plan: { code: string; name: string };
+  } | null;
+  aiBudget: {
+    id: string;
+    mode: "DISABLED" | "LIMITED" | "INTERNAL_UNLIMITED";
+    monthlyRequestLimit: number;
+    warningThresholdPercent: number;
+  } | null;
+  companyProfile: {
+    status: string;
+    version: number;
+    companyName: string;
+    updatedAt: string;
+  } | null;
+  _count: { memberships: number; dailyBriefs: number };
+}
+
+export async function getAdminUsers(signal?: AbortSignal) {
+  const response = await api.get<{ data: { users: AdminUser[] } }>("/admin/users", { signal });
+  return response.data.data.users;
+}
+
+export async function getAdminTenants(signal?: AbortSignal) {
+  const response = await api.get<{ data: { tenants: AdminTenant[] } }>("/admin/tenants", { signal });
+  return response.data.data.tenants;
+}
+
+export async function updateAdminUser(
+  userId: string,
+  input: { status?: AdminUser["status"]; role?: "USER" | "MEMBER" | "ADMIN"; verified?: boolean },
+) {
+  await api.patch(`/admin/users/${encodeURIComponent(userId)}`, input);
+}
+
+export async function createAdminUser(input: {
+  name: string;
+  email: string;
+  tenantId?: string;
+  tenantRole?: "TENANT_ADMIN" | "SALES_MANAGER" | "SALES_USER" | "REVIEWER" | "BILLING_ADMIN" | "VIEWER";
+}) {
+  const response = await api.post<{
+    data: { user: Pick<AdminUser, "id" | "name" | "email" | "status">; invitationDelivered: boolean };
+  }>("/admin/users", input);
+  return response.data.data;
+}
+
+export async function revokeAdminUserSessions(userId: string, reason: string) {
+  const response = await api.post<{ data: { revoked: number } }>(
+    `/admin/users/${encodeURIComponent(userId)}/revoke-sessions`,
+    { confirm: true, reason },
+  );
+  return response.data.data.revoked;
+}
+
+export async function updateTenantAiBudget(
+  tenantId: string,
+  input: {
+    mode: "DISABLED" | "LIMITED" | "INTERNAL_UNLIMITED";
+    monthlyRequestLimit: number;
+    warningThresholdPercent: number;
+    reason: string;
+  },
+) {
+  const response = await api.put<{ data: { budget: AdminTenant["aiBudget"] } }>(
+    `/admin/tenants/${encodeURIComponent(tenantId)}/ai-budget`,
+    { ...input, confirm: true },
+  );
+  return response.data.data.budget;
+}
+
+export interface AdminAutomationJob {
+  id: string;
+  tenantId: string;
+  category: string;
+  status: string;
+  attemptCount: number;
+  maxAttempts: number;
+  scheduledAt: string;
+  nextAttemptAt: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface AdminSystemStatus {
+  database: "UP" | "DOWN";
+  redis: "UP" | "DOWN" | "NOT_CONFIGURED";
+  webService: "UP" | "DOWN";
+  worker: string;
+  deploymentVersion: string;
+  providers: {
+    ai: { configured: boolean; model: string };
+    search: ResearchStatus;
+    email: { enabled: boolean; mode: string; provider: string };
+  };
+  jobs: Record<string, number>;
+  salesDepartments: Record<string, number>;
+}
+
+export async function getAdminJobs(signal?: AbortSignal) {
+  const response = await api.get<{ data: { jobs: AdminAutomationJob[] } }>("/admin/jobs?limit=100", { signal });
+  return response.data.data.jobs;
+}
+
+export async function getAdminSystem(signal?: AbortSignal) {
+  const response = await api.get<{ data: AdminSystemStatus }>("/admin/system", { signal });
+  return response.data.data;
+}
+
+export async function retryAdminJob(id: string, reason: string) {
+  await api.post(`/admin/jobs/${encodeURIComponent(id)}/retry`, { confirm: true, reason });
+}
+
+export async function cancelAdminJob(id: string, reason: string) {
+  await api.post(`/admin/jobs/${encodeURIComponent(id)}/cancel`, { confirm: true, reason });
+}
+
+export interface AdminSupportSession {
+  id: string;
+  targetUserId: string;
+  tenantId: string;
+  accessLevel: "READ_ONLY" | "WRITE";
+  reason: string;
+  startedAt: string;
+  expiresAt: string;
+  endedAt: string | null;
+}
+
+export async function createSupportSession(input: {
+  targetUserId: string;
+  tenantId: string;
+  accessLevel: "READ_ONLY" | "WRITE";
+  reason: string;
+  durationMinutes: number;
+}) {
+  const response = await api.post<{ data: { session: AdminSupportSession } }>(
+    "/admin/support-sessions",
+    { ...input, confirm: true },
+  );
+  return response.data.data.session;
+}
+
+export async function endSupportSession(id: string, reason: string) {
+  await api.post(`/admin/support-sessions/${encodeURIComponent(id)}/end`, {
+    confirm: true,
+    reason,
+  });
+}
+
+export interface SalesDepartmentStatus {
+  workspace: {
+    id: string;
+    name: string;
+    kind: "CUSTOMER" | "INTERNAL" | "TEST";
+    dataLabel: "REAL" | "TEST";
+  };
+  range: { from: string; to: string; label: string };
+  config: {
+    mode: "MANUAL" | "ASSISTED" | "AUTONOMOUS";
+    status: "DRAFT" | "READY" | "RUNNING" | "PAUSED" | "BLOCKED" | "STOPPED";
+    outreachGoal: string;
+    searchLocations: string[];
+    approvedClaims: string[];
+    prohibitedClaims: string[];
+    approvalPolicy: SalesDepartmentConfigInput["approvalPolicy"];
+    dailyContactLimit: number;
+    monthlyContactLimit: number;
+    maximumFollowUps: number;
+    maximumRetries: number;
+    quietHours: SalesDepartmentConfigInput["quietHours"];
+    budgetMinor: number;
+    currency: string;
+    senderIdentity: SalesDepartmentConfigInput["senderIdentity"];
+    senderVerified: boolean;
+    humanMeetingOwner: string;
+  };
+  canStart: boolean;
+  blockers: Array<{ code: string; message: string; blocking: boolean }>;
+  providers: {
+    research: ResearchStatus;
+    ai: { configured: boolean; selected: string; model: string };
+    email: { enabled: boolean; mode: "disabled" | "test" | "live" };
+  };
+  metrics: {
+    leadsDiscovered: number;
+    leadsVerified: number;
+    qualifiedProspects: number;
+    outreachAwaitingApproval: number;
+    outreachSent: number;
+    deliveriesConfirmed: number;
+    replies: number;
+    interestedProspects: number;
+    meetings: number;
+    opportunities: number;
+    wonCustomers: number;
+    revenue: number;
+    revenueCurrency: string;
+    humanActions: number;
+    aiRequests: number;
+    searchRequests: number;
+    estimatedAiCostMinor: number;
+    externalProviderCostsAvailable: boolean;
+  };
+  currentBlocker: { code: string; message: string; blocking: boolean } | null;
+  recommendedNextAction: string;
+  employees: Array<{
+    key: string;
+    name: string;
+    role: string;
+    job: string;
+    status: string;
+    currentTask: string | null;
+    errorState: string | null;
+    kpi: string;
+  }>;
+  recentJobs: Array<{
+    id: string;
+    category: string;
+    status: string;
+    errorCode: string | null;
+    createdAt: string;
+    completedAt: string | null;
+  }>;
+}
+
+export interface SalesDepartmentConfigInput {
+  mode: "MANUAL" | "ASSISTED" | "AUTONOMOUS";
+  outreachGoal: string;
+  searchLocations: string[];
+  approvedClaims: string[];
+  prohibitedClaims: string[];
+  approvalPolicy: {
+    newAudience: boolean;
+    firstOutreach: boolean;
+    sensitiveReplies: boolean;
+    pricing: boolean;
+    proposals: boolean;
+    contracts: boolean;
+  };
+  dailyContactLimit: number;
+  monthlyContactLimit: number;
+  maximumFollowUps: number;
+  maximumRetries: number;
+  quietHours: { timezone: string; start: string; end: string };
+  budgetMinor: number;
+  currency: string;
+  senderIdentity: { name: string; role: string; email: string; disclosure: string };
+  humanMeetingOwner: string;
+}
+
+export async function getSalesDepartmentStatus(signal?: AbortSignal, range?: { from: string; to: string }) {
+  const response = await api.get<{ data: SalesDepartmentStatus }>("/sales-department/status", { signal, params: range });
+  return response.data.data;
+}
+
+export async function startSalesDepartment() {
+  const response = await api.post<{ data: { status: string } }>("/sales-department/start", { confirm: true });
+  return response.data.data;
+}
+
+export async function updateSalesDepartmentConfig(input: SalesDepartmentConfigInput) {
+  const response = await api.put<{ data: { config: SalesDepartmentStatus["config"] } }>(
+    "/sales-department/config",
+    input,
+  );
+  return response.data.data.config;
+}
+
+export async function pauseSalesDepartment(reason: string) {
+  const response = await api.post("/sales-department/pause", { confirm: true, reason });
+  return response.data.data;
+}

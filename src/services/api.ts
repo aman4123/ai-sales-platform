@@ -14,6 +14,7 @@ interface RetriableRequest extends InternalAxiosRequestConfig {
 }
 
 const baseURL = import.meta.env.VITE_API_URL || "/api";
+const supportStorageKey = "ai-sales-support-context";
 let accessToken: string | null = null;
 let refreshPromise: Promise<AuthPayload> | null = null;
 
@@ -26,6 +27,38 @@ export const api = axios.create({
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
+}
+
+export interface SupportContext {
+  sessionId: string;
+  targetUserName: string;
+  tenantName: string;
+  accessLevel: "READ_ONLY" | "WRITE";
+  expiresAt: string;
+}
+
+export function getSupportContext(): SupportContext | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(supportStorageKey);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as SupportContext;
+    if (!parsed.sessionId || new Date(parsed.expiresAt) <= new Date()) {
+      window.localStorage.removeItem(supportStorageKey);
+      return null;
+    }
+    return parsed;
+  } catch {
+    window.localStorage.removeItem(supportStorageKey);
+    return null;
+  }
+}
+
+export function setSupportContext(context: SupportContext | null) {
+  if (typeof window === "undefined") return;
+  if (context) window.localStorage.setItem(supportStorageKey, JSON.stringify(context));
+  else window.localStorage.removeItem(supportStorageKey);
+  window.dispatchEvent(new Event("support:changed"));
 }
 
 export function refreshSession(): Promise<AuthPayload> {
@@ -56,6 +89,11 @@ api.interceptors.request.use((config) => {
   if (accessToken) {
     config.headers = AxiosHeaders.from(config.headers);
     config.headers.set("authorization", `Bearer ${accessToken}`);
+  }
+  const support = getSupportContext();
+  if (support) {
+    config.headers = AxiosHeaders.from(config.headers);
+    config.headers.set("x-support-session-id", support.sessionId);
   }
   return config;
 });
