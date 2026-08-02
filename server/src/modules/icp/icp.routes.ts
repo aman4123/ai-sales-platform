@@ -3,6 +3,7 @@ import { z } from "zod";
 import { NotFoundError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import { buildIdealCustomerProfile, scoreLead } from "./icp.service.js";
+import { tenantScope, tenantWrite } from "../tenancy/tenant.service.js";
 
 const icpSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -36,7 +37,7 @@ export function createIcpRouter(database: DatabaseClient) {
 
   router.get("/", async (request, response) => {
     const profiles = await database.idealCustomerProfile.findMany({
-      where: { userId: request.user!.id, deletedAt: null },
+      where: { ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       orderBy: { createdAt: "desc" },
       take: 100,
     });
@@ -49,6 +50,7 @@ export function createIcpRouter(database: DatabaseClient) {
     const profile = await database.idealCustomerProfile.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         name: input.name,
         productService: input.productService,
         targetIndustry: input.targetIndustry,
@@ -71,7 +73,7 @@ export function createIcpRouter(database: DatabaseClient) {
   router.get("/:id", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const profile = await database.idealCustomerProfile.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
     });
     if (!profile) throw new NotFoundError("Ideal customer profile");
     response.json({ data: { profile } });

@@ -9,12 +9,15 @@ import { createCrmRouter } from "./crm/crm.routes.js";
 import { createIcpRouter } from "./icp/icp.routes.js";
 import { createOperationsRouter } from "./operations/operations.routes.js";
 
-function appFor(router: Router) {
+function appFor(router: Router, masterAdmin = false) {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
     req.id = "request-1";
-    req.user = { id: "user-1", email: "user@example.com", role: "USER" };
+    req.user = masterAdmin
+      ? { id: "user-1", email: "master@example.com", role: "MASTER_ADMIN", accountRole: "MASTER_ADMIN", accessMode: "MASTER_ADMIN" }
+      : { id: "user-1", email: "user@example.com", role: "USER" };
+    req.tenant = { id: "tenant-1", name: "Test workspace", status: "ACTIVE", kind: masterAdmin ? "INTERNAL" : "CUSTOMER", role: "TENANT_ADMIN" };
     next();
   });
   app.use(router);
@@ -26,6 +29,7 @@ function databaseFixture() {
   const now = new Date();
   const database = {
     user: { count: vi.fn().mockResolvedValue(10) },
+    companyProfile: { findFirst: vi.fn().mockResolvedValue(null) },
     salesGoal: {
       findMany: vi.fn().mockResolvedValue([{ id: "goal-1" }]),
       create: vi.fn(async ({ data }) => ({ id: "goal-1", status: "DRAFT", createdAt: now, ...data })),
@@ -137,7 +141,7 @@ describe("V2 command, ICP, operations, and admin routes", () => {
   });
 
   it("returns sanitized admin aggregates and writes an audit event", async () => {
-    const response = await request(appFor(createAdminRouter(database))).get("/overview");
+    const response = await request(appFor(createAdminRouter(database), true)).get("/overview");
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({ users: 10, activeUsers: 1, aiRequests: 7, abuseFlags: 1 });
     expect(response.body.data.providerHealth.ai).not.toHaveProperty("apiKey");

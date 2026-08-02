@@ -7,8 +7,10 @@ import { AppError, NotFoundError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import type { RedisClient } from "../../lib/redis.js";
 import type { Prisma } from "../../generated/prisma/client.js";
-import { consumeMonthlyAiRequest, resolveAiProvider } from "../ai/ai.routes.js";
+import { consumeTenantAiRequest, resolveAiProvider } from "../ai/ai.routes.js";
 import { askGroq } from "../ai/ai.service.js";
+import { tenantScope, tenantWrite } from "../tenancy/tenant.service.js";
+import { classifyReplyText } from "../webhooks/email-webhook.routes.js";
 import {
   groundedEmailPromptVersion,
   groundedEmailSystemPrompt,
@@ -18,6 +20,7 @@ import {
   type VerifiedEmailFact,
 } from "./campaign.email.js";
 import { automationStopReason, canQueueCampaign, canSendCampaign, hasCurrentApproval } from "./campaign.policy.js";
+import { createUnsubscribeToken } from "./unsubscribe.token.js";
 
 const toneSchema = z.enum(["Professional", "Friendly", "Sales", "Formal"]);
 const emailHeaderSchema = (maximum: number) =>
@@ -77,7 +80,7 @@ const confirmationSchema = z.object({ confirm: z.literal(true) });
 const replySchema = z.object({
   providerReplyId: z.string().trim().min(1).max(200).optional(),
   contentPreview: z.string().trim().max(500).optional(),
-  classification: z.string().trim().max(80).optional(),
+  classification: z.enum(["INTERESTED", "NOT_INTERESTED", "FOLLOW_UP_LATER", "MEETING_REQUEST", "PRICING_QUESTION", "PRODUCT_QUESTION", "OBJECTION", "WRONG_CONTACT", "REFERRAL", "OUT_OF_OFFICE", "UNSUBSCRIBE", "COMPLAINT", "BOUNCE", "UNKNOWN"]).optional(),
 });
 const optOutSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(254),
@@ -110,22 +113,128 @@ function recipientEmail(recipient: {
   return recipient.contact?.publicEmail ?? recipient.lead?.email ?? null;
 }
 
+export async function reserveGlobalRecipientDelivery(
+  database: DatabaseClient,
+  email: string,
+  accessMode: string,
+) {
+  if (accessMode === "TESTER" || env.OUTBOUND_DELIVERY_MODE !== "live") return true;
+  const delegate = (database as unknown as { globalRecipientSafety?: { upsert?: unknown } })
+    .globalRecipientSafety;
+  if (typeof delegate?.upsert !== "function") return true;
+
+  const normalized = email.trim().toLowerCase();
+  const domain = normalized.split("@")[1] ?? "unknown";
+  const recipientHash = suppressionHash(normalized);
+  const domainHash = suppressionHash(domain);
+  const now = new Date();
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  const safety = await database.$transaction(async (transaction) => {
+    await transaction.globalRecipientSafety.upsert({
+      where: { recipientHash },
+      create: {
+        recipientHash,
+        domainHash,
+        rollingDayCount: 0,
+        rollingMonthCount: 0,
+        rollingDayStartedAt: dayStart,
+        rollingMonthStartedAt: monthStart,
+      },
+      update: { domainHash },
+    });
+    await transaction.globalRecipientSafety.updateMany({
+      where: { recipientHash, rollingDayStartedAt: { lt: dayStart } },
+      data: { rollingDayCount: 0, rollingDayStartedAt: dayStart },
+    });
+    await transaction.globalRecipientSafety.updateMany({
+      where: { recipientHash, rollingMonthStartedAt: { lt: monthStart } },
+      data: { rollingMonthCount: 0, rollingMonthStartedAt: monthStart },
+    });
+    await transaction.globalDomainSafety.upsert({
+      where: { domainHash },
+      create: {
+        domainHash,
+        rollingDayCount: 0,
+        rollingMonthCount: 0,
+        rollingDayStartedAt: dayStart,
+        rollingMonthStartedAt: monthStart,
+      },
+      update: {},
+    });
+    await transaction.globalDomainSafety.updateMany({
+      where: { domainHash, rollingDayStartedAt: { lt: dayStart } },
+      data: { rollingDayCount: 0, rollingDayStartedAt: dayStart },
+    });
+    await transaction.globalDomainSafety.updateMany({
+      where: { domainHash, rollingMonthStartedAt: { lt: monthStart } },
+      data: { rollingMonthCount: 0, rollingMonthStartedAt: monthStart },
+    });
+    const recipient = await transaction.globalRecipientSafety.update({
+      where: { recipientHash },
+      data: {
+        rollingDayCount: { increment: 1 },
+        rollingMonthCount: { increment: 1 },
+        lastSentAt: now,
+      },
+    });
+    const domainSafety = await transaction.globalDomainSafety.update({
+      where: { domainHash },
+      data: {
+        rollingDayCount: { increment: 1 },
+        rollingMonthCount: { increment: 1 },
+        lastSentAt: now,
+      },
+    });
+    return { recipient, domain: domainSafety };
+  });
+
+  const blocked = Boolean(safety.recipient.globallySuppressedAt)
+    || Boolean(safety.recipient.cooldownUntil && safety.recipient.cooldownUntil > now)
+    || Boolean(safety.domain.cooldownUntil && safety.domain.cooldownUntil > now)
+    || safety.recipient.rollingDayCount > env.PLATFORM_RECIPIENT_DAILY_LIMIT
+    || safety.recipient.rollingMonthCount > env.PLATFORM_RECIPIENT_MONTHLY_LIMIT
+    || safety.domain.rollingDayCount > env.PLATFORM_DOMAIN_DAILY_LIMIT
+    || safety.domain.rollingMonthCount > env.PLATFORM_DOMAIN_MONTHLY_LIMIT;
+  if (blocked) {
+    if (!safety.recipient.cooldownUntil || safety.recipient.cooldownUntil <= now) {
+      await database.globalRecipientSafety.update({
+        where: { recipientHash },
+        data: {
+          cooldownUntil: new Date(now.getTime() + env.PLATFORM_RECIPIENT_COOLDOWN_HOURS * 3_600_000),
+        },
+      });
+    }
+    if (!safety.domain.cooldownUntil || safety.domain.cooldownUntil <= now) {
+      await database.globalDomainSafety.update({
+        where: { domainHash },
+        data: { cooldownUntil: new Date(now.getTime() + env.PLATFORM_RECIPIENT_COOLDOWN_HOURS * 3_600_000) },
+      });
+    }
+    return false;
+  }
+  return true;
+}
+
 function messageKind(step: number) {
   return (["INITIAL", "FOLLOW_UP_1", "FOLLOW_UP_2", "FINAL_FOLLOW_UP"] as const)[step]!;
 }
 
-async function ownedCampaign(database: DatabaseClient, id: string, userId: string) {
+type RecordScope = { tenantId: string } | { userId: string };
+
+async function ownedCampaign(database: DatabaseClient, id: string, scope: RecordScope) {
   const campaign = await database.campaign.findFirst({
-    where: { id, userId, deletedAt: null },
+    where: { id, ...scope, deletedAt: null },
   });
   if (!campaign) throw new NotFoundError("Campaign");
   return campaign;
 }
 
-async function invalidateApproval(database: DatabaseClient, campaignId: string, userId: string) {
+async function invalidateApproval(database: DatabaseClient, campaignId: string, scope: RecordScope) {
   await database.$transaction([
     database.campaign.update({
-      where: { id: campaignId, userId },
+      where: { id: campaignId, ...scope },
       data: {
         contentVersion: { increment: 1 },
         approvedVersion: null,
@@ -133,7 +242,7 @@ async function invalidateApproval(database: DatabaseClient, campaignId: string, 
       },
     }),
     database.campaignMessage.updateMany({
-      where: { campaignId, userId, status: { in: ["DRAFT", "APPROVED", "QUEUED"] } },
+      where: { campaignId, ...scope, status: { in: ["DRAFT", "APPROVED", "QUEUED"] } },
       data: { status: "DRAFT", queuedAt: null },
     }),
     database.campaignRecipient.updateMany({
@@ -176,7 +285,7 @@ export function createCampaignRouter(
 
   router.get("/", async (request, response) => {
     const campaigns = await database.campaign.findMany({
-      where: { userId: request.user!.id, deletedAt: null },
+      where: { ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       orderBy: { createdAt: "desc" },
       take: 100,
       include: { _count: { select: { recipients: true, messages: true, approvals: true } } },
@@ -188,7 +297,7 @@ export function createCampaignRouter(
     const input = campaignSchema.parse(request.body);
     if (input.idealCustomerProfileId) {
       const profile = await database.idealCustomerProfile.findFirst({
-        where: { id: input.idealCustomerProfileId, userId: request.user!.id, deletedAt: null },
+        where: { id: input.idealCustomerProfileId, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
         select: { id: true },
       });
       if (!profile) throw new NotFoundError("Ideal customer profile");
@@ -196,6 +305,7 @@ export function createCampaignRouter(
     const campaign = await database.campaign.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         idealCustomerProfileId: input.idealCustomerProfileId ?? null,
         name: input.name,
         salesGoal: input.salesGoal,
@@ -212,6 +322,7 @@ export function createCampaignRouter(
     await database.auditLog.create({
       data: {
         actorUserId: request.user!.id,
+        ...tenantWrite(request.tenant),
         action: "CAMPAIGN_CREATED",
         resourceType: "Campaign",
         resourceId: campaign.id,
@@ -224,7 +335,7 @@ export function createCampaignRouter(
   router.get("/:id", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const campaign = await database.campaign.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       include: {
         recipients: { include: { lead: true, contact: true, company: true } },
         messages: { orderBy: [{ recipientId: "asc" }, { sequenceStep: "asc" }] },
@@ -238,16 +349,16 @@ export function createCampaignRouter(
   router.put("/:id", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const input = updateCampaignSchema.parse(request.body);
-    await ownedCampaign(database, id, request.user!.id);
+    await ownedCampaign(database, id, tenantScope(request.tenant, request.user!.id));
     if (input.idealCustomerProfileId) {
       const profile = await database.idealCustomerProfile.findFirst({
-        where: { id: input.idealCustomerProfileId, userId: request.user!.id, deletedAt: null },
+        where: { id: input.idealCustomerProfileId, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       });
       if (!profile) throw new NotFoundError("Ideal customer profile");
     }
-    await invalidateApproval(database, id, request.user!.id);
+    await invalidateApproval(database, id, tenantScope(request.tenant, request.user!.id));
     const campaign = await database.campaign.update({
-      where: { id, userId: request.user!.id },
+      where: { id, ...tenantScope(request.tenant, request.user!.id) },
       data: {
         ...(input.idealCustomerProfileId !== undefined
           ? { idealCustomerProfileId: input.idealCustomerProfileId }
@@ -274,15 +385,15 @@ export function createCampaignRouter(
   router.post("/:id/recipients", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const input = recipientSchema.parse(request.body);
-    await ownedCampaign(database, id, request.user!.id);
+    await ownedCampaign(database, id, tenantScope(request.tenant, request.user!.id));
     const [leads, contacts] = await Promise.all([
       database.lead.findMany({
-        where: { id: { in: input.leadIds }, userId: request.user!.id },
+        where: { id: { in: input.leadIds }, ...tenantScope(request.tenant, request.user!.id) },
       }),
       database.contact.findMany({
         where: {
           id: { in: input.contactIds },
-          userId: request.user!.id,
+          ...tenantScope(request.tenant, request.user!.id),
           deletedAt: null,
           verificationStatus: { not: "UNVERIFIED" },
         },
@@ -295,12 +406,13 @@ export function createCampaignRouter(
         "Every recipient must be owned by the user and public contact data must be verified.",
       );
     }
-    await invalidateApproval(database, id, request.user!.id);
+    await invalidateApproval(database, id, tenantScope(request.tenant, request.user!.id));
     for (const lead of leads) {
       await database.campaignRecipient.upsert({
         where: { campaignId_leadId: { campaignId: id, leadId: lead.id } },
         create: {
           campaignId: id,
+          ...tenantWrite(request.tenant),
           leadId: lead.id,
           companyId: lead.companyRecordId,
           contactId: lead.contactRecordId,
@@ -311,7 +423,7 @@ export function createCampaignRouter(
     for (const contact of contacts) {
       await database.campaignRecipient.upsert({
         where: { campaignId_contactId: { campaignId: id, contactId: contact.id } },
-        create: { campaignId: id, contactId: contact.id, companyId: contact.companyId },
+        create: { campaignId: id, ...tenantWrite(request.tenant), contactId: contact.id, companyId: contact.companyId },
         update: { status: "PENDING", stopReason: null },
       });
     }
@@ -324,7 +436,7 @@ export function createCampaignRouter(
     const id = idSchema.parse(request.params.id);
     confirmationSchema.parse(request.body);
     const campaign = await database.campaign.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       include: {
         recipients: {
           where: { status: { in: ["PENDING", "APPROVED"] } },
@@ -348,6 +460,11 @@ export function createCampaignRouter(
     const settings = await database.userSettings.findUnique({
       where: { userId: request.user!.id },
     });
+    const companyProfile = request.tenant
+      ? await database.companyProfile.findFirst({
+          where: { tenantId: request.tenant.id, status: "APPROVED" },
+        })
+      : null;
     const provider = resolveAiProvider(settings?.aiProvider ?? "MOCK");
     if (provider !== "GROQ") {
       throw new AppError(503, "AI_PROVIDER_NOT_CONFIGURED", "Groq is required for grounded drafts.");
@@ -393,6 +510,18 @@ export function createCampaignRouter(
         valueProposition: campaign.valueProposition,
         campaignGoal: campaign.salesGoal,
         verifiedFacts: facts,
+        ...(companyProfile
+          ? {
+              approvedBrandContext: {
+                companyName: companyProfile.companyName,
+                profileVersion: companyProfile.version,
+                preferredTone: companyProfile.preferredTone,
+                approvedClaims: companyProfile.valuePropositions,
+                exclusions: companyProfile.exclusions,
+                complianceRequirements: companyProfile.complianceRequirements,
+              },
+            }
+          : {}),
       };
 
       for (const step of steps) {
@@ -406,7 +535,11 @@ export function createCampaignRouter(
           },
         });
         if (existing) continue;
-        await consumeMonthlyAiRequest(redis);
+        await consumeTenantAiRequest(database, redis, {
+          userId: request.user!.id,
+          ...(request.tenant ? { tenantId: request.tenant.id } : {}),
+          accountRole: request.user!.accountRole,
+        });
         const raw = await askGroq(
           groundedEmailSystemPrompt,
           groundedEmailUserPrompt({
@@ -423,6 +556,7 @@ export function createCampaignRouter(
         await database.campaignMessage.create({
           data: {
             userId: request.user!.id,
+            ...tenantWrite(request.tenant),
             campaignId: campaign.id,
             recipientId: recipient.id,
             kind: messageKind(step.step),
@@ -438,6 +572,7 @@ export function createCampaignRouter(
               wordCount: draft.wordCount,
               averageWordsPerSentence: draft.averageWordsPerSentence,
               spamWarnings: draft.spamWarnings,
+              brandProfileVersion: companyProfile?.version ?? null,
             } as unknown as Prisma.InputJsonValue,
             evidenceIds: draft.evidenceIds,
             promptVersion: groundedEmailPromptVersion,
@@ -457,7 +592,7 @@ export function createCampaignRouter(
 
     if (created > 0) {
       await database.campaign.update({
-        where: { id: campaign.id, userId: request.user!.id },
+        where: { id: campaign.id, ...tenantScope(request.tenant, request.user!.id) },
         data: { status: "READY_FOR_REVIEW" },
       });
     }
@@ -468,7 +603,7 @@ export function createCampaignRouter(
     const messageId = idSchema.parse(request.params.messageId);
     const input = editMessageSchema.parse(request.body);
     const existing = await database.campaignMessage.findFirst({
-      where: { id: messageId, userId: request.user!.id },
+      where: { id: messageId, ...tenantScope(request.tenant, request.user!.id) },
       include: { campaign: true },
     });
     if (!existing || existing.campaign.deletedAt) throw new NotFoundError("Campaign message");
@@ -478,19 +613,19 @@ export function createCampaignRouter(
     const newVersion = existing.campaign.contentVersion + 1;
     await database.$transaction([
       database.campaign.update({
-        where: { id: existing.campaignId, userId: request.user!.id },
+        where: { id: existing.campaignId, ...tenantScope(request.tenant, request.user!.id) },
         data: { contentVersion: newVersion, approvedVersion: null, status: "READY_FOR_REVIEW" },
       }),
       database.campaignMessage.updateMany({
         where: {
           campaignId: existing.campaignId,
-          userId: request.user!.id,
+          ...tenantScope(request.tenant, request.user!.id),
           status: { in: ["DRAFT", "APPROVED", "QUEUED"] },
         },
         data: { contentVersion: newVersion, status: "DRAFT", queuedAt: null },
       }),
       database.campaignMessage.update({
-        where: { id: messageId, userId: request.user!.id },
+        where: { id: messageId, ...tenantScope(request.tenant, request.user!.id) },
         data: input,
       }),
       database.campaignRecipient.updateMany({
@@ -508,7 +643,7 @@ export function createCampaignRouter(
     const id = idSchema.parse(request.params.id);
     const input = approvalSchema.parse(request.body);
     const campaign = await database.campaign.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       include: {
         recipients: true,
         messages: { where: { status: "DRAFT" }, orderBy: { sequenceStep: "asc" } },
@@ -532,6 +667,7 @@ export function createCampaignRouter(
       const record = await transaction.campaignApproval.create({
         data: {
           campaignId: campaign.id,
+          ...tenantWrite(request.tenant),
           approvedById: request.user!.id,
           approvalType: input.approvalType,
           contentVersion: campaign.contentVersion,
@@ -556,7 +692,7 @@ export function createCampaignRouter(
         },
       });
       await transaction.campaign.update({
-        where: { id: campaign.id, userId: request.user!.id },
+        where: { id: campaign.id, ...tenantScope(request.tenant, request.user!.id) },
         data: { status: "APPROVED", approvedVersion: campaign.contentVersion },
       });
       await transaction.campaignRecipient.updateMany({
@@ -570,6 +706,7 @@ export function createCampaignRouter(
       await transaction.auditLog.create({
         data: {
           actorUserId: request.user!.id,
+          ...tenantWrite(request.tenant),
           action: "CAMPAIGN_APPROVED",
           resourceType: "Campaign",
           resourceId: campaign.id,
@@ -586,7 +723,7 @@ export function createCampaignRouter(
     const id = idSchema.parse(request.params.id);
     confirmationSchema.parse(request.body);
     const campaign = await database.campaign.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       include: {
         recipients: { include: { contact: true, lead: true } },
         messages: { where: { status: "APPROVED" } },
@@ -609,7 +746,7 @@ export function createCampaignRouter(
         continue;
       }
       const suppression = await database.optOut.findUnique({
-        where: { userId_emailHash: { userId: request.user!.id, emailHash: suppressionHash(email) } },
+        where: { tenantId_emailHash: { tenantId: request.tenant!.id, emailHash: suppressionHash(email) } },
       });
       if (suppression || recipient.optedOutAt || recipient.repliedAt) suppressedRecipientIds.add(recipient.id);
     }
@@ -639,7 +776,7 @@ export function createCampaignRouter(
         data: { status: "OPTED_OUT", stopReason: "RECIPIENT_SUPPRESSED" },
       }),
       database.campaign.update({
-        where: { id: campaign.id, userId: request.user!.id },
+        where: { id: campaign.id, ...tenantScope(request.tenant, request.user!.id) },
         data: { status: queuedIds.length > 0 ? "SCHEDULED" : "PAUSED" },
       }),
     ]);
@@ -650,7 +787,7 @@ export function createCampaignRouter(
     const id = idSchema.parse(request.params.id);
     confirmationSchema.parse(request.body);
     const campaign = await database.campaign.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       include: { approvals: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!campaign) throw new NotFoundError("Campaign");
@@ -659,12 +796,13 @@ export function createCampaignRouter(
     }
     const updated = await database.$transaction(async (transaction) => {
       const record = await transaction.campaign.update({
-        where: { id, userId: request.user!.id },
+        where: { id, ...tenantScope(request.tenant, request.user!.id) },
         data: { status: "PAUSED", pausedAt: new Date() },
       });
       await transaction.auditLog.create({
         data: {
           actorUserId: request.user!.id,
+          ...tenantWrite(request.tenant),
           action: "CAMPAIGN_PAUSED",
           resourceType: "Campaign",
           resourceId: id,
@@ -680,7 +818,7 @@ export function createCampaignRouter(
     const id = idSchema.parse(request.params.id);
     confirmationSchema.parse(request.body);
     const campaign = await database.campaign.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       include: { approvals: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!campaign) throw new NotFoundError("Campaign");
@@ -694,19 +832,20 @@ export function createCampaignRouter(
       throw new AppError(409, "CAMPAIGN_APPROVAL_REQUIRED", "The current campaign version requires approval.");
     }
     const queuedMessages = await database.campaignMessage.count({
-      where: { campaignId: id, userId: request.user!.id, status: "QUEUED" },
+      where: { campaignId: id, ...tenantScope(request.tenant, request.user!.id), status: "QUEUED" },
     });
     if (queuedMessages === 0) {
       throw new AppError(409, "CAMPAIGN_QUEUE_EMPTY", "No approved queued messages are available to resume.");
     }
     const updated = await database.$transaction(async (transaction) => {
       const record = await transaction.campaign.update({
-        where: { id, userId: request.user!.id },
+        where: { id, ...tenantScope(request.tenant, request.user!.id) },
         data: { status: "SCHEDULED", pausedAt: null },
       });
       await transaction.auditLog.create({
         data: {
           actorUserId: request.user!.id,
+          ...tenantWrite(request.tenant),
           action: "CAMPAIGN_RESUMED",
           resourceType: "Campaign",
           resourceId: id,
@@ -721,7 +860,7 @@ export function createCampaignRouter(
   router.post("/:id/stop", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     confirmationSchema.parse(request.body);
-    const campaign = await ownedCampaign(database, id, request.user!.id);
+    const campaign = await ownedCampaign(database, id, tenantScope(request.tenant, request.user!.id));
     if (["COMPLETED", "CANCELLED"].includes(campaign.status)) {
       throw new AppError(409, "CAMPAIGN_ALREADY_TERMINAL", "This campaign has already finished or been stopped.");
     }
@@ -730,7 +869,7 @@ export function createCampaignRouter(
       await transaction.campaignMessage.updateMany({
         where: {
           campaignId: id,
-          userId: request.user!.id,
+          ...tenantScope(request.tenant, request.user!.id),
           status: { in: ["DRAFT", "APPROVED", "QUEUED"] },
         },
         data: { status: "CANCELLED", cancelledAt: now, failureReason: "CAMPAIGN_STOPPED_BY_USER" },
@@ -740,12 +879,13 @@ export function createCampaignRouter(
         data: { status: "CANCELLED", stopReason: "CAMPAIGN_STOPPED_BY_USER" },
       });
       const record = await transaction.campaign.update({
-        where: { id, userId: request.user!.id },
+        where: { id, ...tenantScope(request.tenant, request.user!.id) },
         data: { status: "CANCELLED", pausedAt: now },
       });
       await transaction.auditLog.create({
         data: {
           actorUserId: request.user!.id,
+          ...tenantWrite(request.tenant),
           action: "CAMPAIGN_STOPPED",
           resourceType: "Campaign",
           resourceId: id,
@@ -768,7 +908,7 @@ export function createCampaignRouter(
       );
     }
     const campaign = await database.campaign.findFirst({
-      where: { id, userId: request.user!.id, deletedAt: null },
+      where: { id, ...tenantScope(request.tenant, request.user!.id), deletedAt: null },
       include: { approvals: { orderBy: { createdAt: "desc" }, take: 1 } },
     });
     if (!campaign) throw new NotFoundError("Campaign");
@@ -782,10 +922,34 @@ export function createCampaignRouter(
     if (!settings?.unsubscribeFooter.trim()) {
       throw new AppError(422, "UNSUBSCRIBE_FOOTER_REQUIRED", "Configure an unsubscribe footer before sending.");
     }
+    const sender = campaign.senderIdentity as { displayName?: unknown; email?: unknown };
+    if (typeof sender.displayName !== "string" || typeof sender.email !== "string") {
+      throw new AppError(422, "SENDER_IDENTITY_INVALID", "The approved campaign sender identity is invalid.");
+    }
+    if (env.OUTBOUND_DELIVERY_MODE === "live" && request.user!.accessMode !== "TESTER") {
+      const [department, profile] = request.tenant
+        ? await Promise.all([
+            database.salesDepartmentConfig.findUnique({ where: { tenantId: request.tenant.id } }),
+            database.companyProfile.findUnique({ where: { tenantId: request.tenant.id } }),
+          ])
+        : [null, null];
+      const approvedSender = department?.senderIdentity as { name?: unknown; role?: unknown; email?: unknown } | undefined;
+      const approvedDisplayName = typeof approvedSender?.name === "string" && typeof approvedSender.role === "string"
+        ? `${approvedSender.name} — ${approvedSender.role}`
+        : null;
+      const contactDetails = profile?.contactDetails as { address?: unknown } | undefined;
+      const businessAddress = typeof contactDetails?.address === "string" ? contactDetails.address.trim() : "";
+      if (!department?.senderVerified || approvedSender?.email !== sender.email || approvedDisplayName !== sender.displayName) {
+        throw new AppError(409, "SENDER_VERIFICATION_REQUIRED", "Live outreach requires the current approved and verified sender identity.");
+      }
+      if (profile?.status !== "APPROVED" || !businessAddress || !settings.unsubscribeFooter.includes(businessAddress)) {
+        throw new AppError(409, "COMPLIANCE_FOOTER_REQUIRED", "Live outreach requires an approved business address in the visible unsubscribe footer.");
+      }
+    }
     const dayStart = new Date();
     dayStart.setUTCHours(0, 0, 0, 0);
     const sentToday = await database.campaignMessage.count({
-      where: { userId: request.user!.id, sentAt: { gte: dayStart } },
+      where: { ...tenantScope(request.tenant, request.user!.id), sentAt: { gte: dayStart } },
     });
     const limit = Math.min(
       campaign.dailySendingLimit,
@@ -795,7 +959,7 @@ export function createCampaignRouter(
     const available = Math.max(0, limit - sentToday);
     if (automationStopReason({ replied: false, optedOut: false, permanentlyFailed: false, complaint: false, confidence: undefined, campaignStatus: campaign.status, limitReached: available === 0 })) {
       const remaining = await database.campaignMessage.count({
-        where: { campaignId: campaign.id, userId: request.user!.id, status: "QUEUED" },
+        where: { campaignId: campaign.id, ...tenantScope(request.tenant, request.user!.id), status: "QUEUED" },
       });
       response.json({ data: { sent: 0, failed: 0, remaining, dailyRemaining: 0 } });
       return;
@@ -803,7 +967,7 @@ export function createCampaignRouter(
     const messages = await database.campaignMessage.findMany({
       where: {
         campaignId: campaign.id,
-        userId: request.user!.id,
+        ...tenantScope(request.tenant, request.user!.id),
         contentVersion: campaign.contentVersion,
         status: "QUEUED",
         scheduledAt: { lte: new Date() },
@@ -833,21 +997,24 @@ export function createCampaignRouter(
       });
       const suppressed = email
         ? await database.optOut.findUnique({
-            where: {
-              userId_emailHash: { userId: request.user!.id, emailHash: suppressionHash(email) },
-            },
+            where: { tenantId_emailHash: { tenantId: request.tenant!.id, emailHash: suppressionHash(email) } },
           })
         : true;
-      if (!email || suppressed || confidenceStop) {
+      const platformAllowed = email
+        ? await reserveGlobalRecipientDelivery(database, email, request.user!.accessMode)
+        : false;
+      if (!email || suppressed || confidenceStop || !platformAllowed) {
+        const stopReason = confidenceStop
+          ?? (!platformAllowed ? "PLATFORM_RECIPIENT_SAFETY_LIMIT" : "RECIPIENT_SUPPRESSED");
         await database.$transaction([
           database.campaignMessage.update({
-            where: { id: message.id, userId: request.user!.id },
-            data: { status: "CANCELLED", cancelledAt: new Date(), failureReason: confidenceStop ?? "RECIPIENT_SUPPRESSED" },
+            where: { id: message.id, ...tenantScope(request.tenant, request.user!.id) },
+            data: { status: "CANCELLED", cancelledAt: new Date(), failureReason: stopReason },
           }),
           database.campaignRecipient.update({
             where: { id: message.recipientId },
-            data: confidenceStop
-              ? { status: "CANCELLED", stopReason: confidenceStop }
+            data: confidenceStop || !platformAllowed
+              ? { status: "CANCELLED", stopReason }
               : { status: "OPTED_OUT", stopReason: "RECIPIENT_SUPPRESSED" },
           }),
         ]);
@@ -856,6 +1023,9 @@ export function createCampaignRouter(
       try {
         await emailService.sendCampaign({
           to: email,
+          senderDisplayName: sender.displayName,
+          senderEmail: sender.email,
+          replyTo: sender.email,
           subject: message.subject,
           greeting: message.greeting,
           body: message.body,
@@ -863,10 +1033,11 @@ export function createCampaignRouter(
           closing: message.closing,
           signature: message.signature,
           unsubscribeFooter: settings.unsubscribeFooter,
+          unsubscribeUrl: `${env.APP_BASE_URL.replace(/\/$/, "")}/api/unsubscribe?token=${encodeURIComponent(createUnsubscribeToken({ tenantId: message.tenantId, recipientId: message.recipientId }))}`,
         });
         await database.$transaction([
           database.campaignMessage.update({
-            where: { id: message.id, userId: request.user!.id },
+            where: { id: message.id, ...tenantScope(request.tenant, request.user!.id) },
             data: {
               status: "SENT",
               sentAt: new Date(),
@@ -883,7 +1054,7 @@ export function createCampaignRouter(
       } catch {
         const finalAttempt = message.attemptCount + 1 >= message.maxAttempts;
         await database.campaignMessage.update({
-          where: { id: message.id, userId: request.user!.id },
+          where: { id: message.id, ...tenantScope(request.tenant, request.user!.id) },
           data: {
             status: finalAttempt ? "FAILED" : "QUEUED",
             failureReason: "EMAIL_PROVIDER_UNAVAILABLE",
@@ -895,10 +1066,10 @@ export function createCampaignRouter(
       }
     }
     const remaining = await database.campaignMessage.count({
-      where: { campaignId: campaign.id, status: "QUEUED" },
+      where: { campaignId: campaign.id, ...tenantScope(request.tenant, request.user!.id), status: "QUEUED" },
     });
     await database.campaign.update({
-      where: { id: campaign.id, userId: request.user!.id },
+      where: { id: campaign.id, ...tenantScope(request.tenant, request.user!.id) },
       data: {
         status: remaining > 0 ? "RUNNING" : "COMPLETED",
         ...(campaign.launchedAt ? {} : { launchedAt: new Date() }),
@@ -912,40 +1083,59 @@ export function createCampaignRouter(
     const recipientId = idSchema.parse(request.params.recipientId);
     const input = replySchema.parse(request.body);
     const recipient = await database.campaignRecipient.findFirst({
-      where: { id: recipientId, campaign: { userId: request.user!.id } },
+      where: { id: recipientId, ...tenantScope(request.tenant, request.user!.id) },
+      include: { contact: { select: { publicEmail: true } }, lead: { select: { email: true } } },
     });
     if (!recipient) throw new NotFoundError("Campaign recipient");
+    const classification = input.classification ?? classifyReplyText(input.contentPreview);
     const reply = await database.$transaction(async (transaction) => {
       const created = await transaction.reply.create({
         data: {
           userId: request.user!.id,
+          ...tenantWrite(request.tenant),
           recipientId,
           ...(input.providerReplyId !== undefined
             ? { providerReplyId: input.providerReplyId }
             : {}),
-          ...(input.classification !== undefined ? { classification: input.classification } : {}),
+          classification,
           ...(input.contentPreview !== undefined ? { contentPreview: input.contentPreview } : {}),
-          requiresHuman: true,
+          requiresHuman: !["OUT_OF_OFFICE", "UNSUBSCRIBE", "BOUNCE"].includes(classification),
           receivedAt: new Date(),
         },
       });
       await transaction.campaignRecipient.update({
         where: { id: recipientId },
-        data: { status: "REPLIED", repliedAt: new Date(), stopReason: "RECIPIENT_REPLIED" },
+        data: classification === "BOUNCE"
+          ? { status: "BOUNCED", stopReason: "RECIPIENT_BOUNCE" }
+          : classification === "UNSUBSCRIBE" || classification === "COMPLAINT"
+            ? { status: "OPTED_OUT", optedOutAt: new Date(), stopReason: `RECIPIENT_${classification}` }
+            : { status: "REPLIED", repliedAt: new Date(), stopReason: "RECIPIENT_REPLIED" },
       });
       await transaction.campaignMessage.updateMany({
         where: { recipientId, status: { in: ["DRAFT", "APPROVED", "QUEUED"] } },
         data: { status: "CANCELLED", cancelledAt: new Date(), failureReason: "RECIPIENT_REPLIED" },
       });
-      await transaction.task.create({
-        data: {
-          userId: request.user!.id,
-          campaignId: recipient.campaignId,
-          type: "HUMAN_RESPONSE_REQUIRED",
-          title: "Human response required.",
-          description: "A campaign recipient replied. Automated follow-ups were stopped.",
-        },
-      });
+      const email = recipient.contact?.publicEmail ?? recipient.lead?.email ?? null;
+      if (email && ["UNSUBSCRIBE", "COMPLAINT", "BOUNCE"].includes(classification)) {
+        const emailHash = suppressionHash(email);
+        await transaction.optOut.upsert({
+          where: { tenantId_emailHash: { tenantId: request.tenant!.id, emailHash } },
+          create: { userId: request.user!.id, ...tenantWrite(request.tenant), emailHash, source: classification, reason: `Inbound event classified as ${classification}.` },
+          update: { source: classification, reason: `Inbound event classified as ${classification}.` },
+        });
+      }
+      if (!["OUT_OF_OFFICE", "UNSUBSCRIBE", "BOUNCE"].includes(classification)) {
+        await transaction.task.create({
+          data: {
+            userId: request.user!.id,
+            ...tenantWrite(request.tenant),
+            campaignId: recipient.campaignId,
+            type: "HUMAN_RESPONSE_REQUIRED",
+            title: classification === "MEETING_REQUEST" ? "Meeting scheduling required." : "Human response required.",
+            description: `A campaign recipient sent a ${classification.toLowerCase().replaceAll("_", " ")} reply. Automated follow-ups were stopped.`,
+          },
+        });
+      }
       return created;
     });
     response.status(201).json({ data: { reply, automationStopped: true } });
@@ -956,18 +1146,18 @@ export function createCampaignRouter(
     const emailHash = suppressionHash(input.email);
     const [contacts, leads] = await Promise.all([
       database.contact.findMany({
-        where: { userId: request.user!.id, publicEmail: { equals: input.email, mode: "insensitive" } },
+        where: { ...tenantScope(request.tenant, request.user!.id), publicEmail: { equals: input.email, mode: "insensitive" } },
         select: { id: true },
       }),
       database.lead.findMany({
-        where: { userId: request.user!.id, email: { equals: input.email, mode: "insensitive" } },
+        where: { ...tenantScope(request.tenant, request.user!.id), email: { equals: input.email, mode: "insensitive" } },
         select: { id: true },
       }),
     ]);
     const recipientIds = (
       await database.campaignRecipient.findMany({
         where: {
-          campaign: { userId: request.user!.id },
+          ...tenantScope(request.tenant, request.user!.id),
           OR: [
             { contactId: { in: contacts.map((item) => item.id) } },
             { leadId: { in: leads.map((item) => item.id) } },
@@ -978,9 +1168,10 @@ export function createCampaignRouter(
     ).map((item) => item.id);
     const optOut = await database.$transaction(async (transaction) => {
       const record = await transaction.optOut.upsert({
-        where: { userId_emailHash: { userId: request.user!.id, emailHash } },
+        where: { tenantId_emailHash: { tenantId: request.tenant!.id, emailHash } },
         create: {
           userId: request.user!.id,
+          ...tenantWrite(request.tenant),
           emailHash,
           reason: input.reason ?? null,
           source: input.source,
@@ -988,7 +1179,7 @@ export function createCampaignRouter(
         update: { reason: input.reason ?? null, source: input.source },
       });
       await transaction.contact.updateMany({
-        where: { id: { in: contacts.map((item) => item.id) }, userId: request.user!.id },
+        where: { id: { in: contacts.map((item) => item.id) }, ...tenantScope(request.tenant, request.user!.id) },
         data: { optedOutAt: new Date() },
       });
       await transaction.campaignRecipient.updateMany({

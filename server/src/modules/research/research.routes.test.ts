@@ -13,6 +13,7 @@ function appFor(database: DatabaseClient, redis: RedisClient | null) {
   app.use((req, _res, next) => {
     req.id = "request-1";
     req.user = { id: "user-1", email: "user@example.com", role: "USER", accountRole: "USER", accessMode: "USER" };
+    req.tenant = { id: "tenant-1", name: "User workspace", status: "ACTIVE", kind: "CUSTOMER", role: "TENANT_ADMIN" };
     next();
   });
   app.use(createResearchRouter(database, redis));

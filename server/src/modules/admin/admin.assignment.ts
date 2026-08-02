@@ -2,11 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { hash } from "bcryptjs";
 import { env } from "../../config/env.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
+import { ensurePersonalTenant } from "../tenancy/tenant.service.js";
 
 function normalizedEmail(rawEmail: string) {
   const email = rawEmail.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error("INITIAL_ADMIN_EMAIL must be a valid email address.");
+    throw new Error("MASTER_ADMIN_EMAIL must be a valid email address.");
   }
   return email;
 }
@@ -28,7 +29,7 @@ export async function ensureInitialMasterAccount(database: DatabaseClient, rawEm
             emailVerifiedAt: new Date(),
             passwordHash,
             name: "Master Tester",
-            role: "SUPER_ADMIN",
+            role: "MASTER_ADMIN",
             settings: { create: {} },
           },
           select: { id: true },
@@ -39,11 +40,36 @@ export async function ensureInitialMasterAccount(database: DatabaseClient, rawEm
             action: "INITIAL_MASTER_ACCOUNT_CREATED",
             resourceType: "User",
             resourceId: account.id,
-            metadata: { method: "INITIAL_ADMIN_EMAIL", passwordResetRequired: true },
+            metadata: { method: "MASTER_ADMIN_EMAIL", passwordResetRequired: true },
           },
         });
         return account;
       });
+      const tenant = await ensurePersonalTenant(database, {
+        id: created.id,
+        name: "Master Admin",
+        role: "MASTER_ADMIN",
+      });
+      if (tenant) {
+        await database.aiBudget.upsert({
+          where: { tenantId: tenant.id },
+          create: {
+            tenantId: tenant.id,
+            mode: "INTERNAL_UNLIMITED",
+            monthlyRequestLimit: 0,
+            manualOverrideReason: "Secure initial Master Admin internal access.",
+            configuredById: created.id,
+            configuredAt: new Date(),
+          },
+          update: {
+            mode: "INTERNAL_UNLIMITED",
+            monthlyRequestLimit: 0,
+            manualOverrideReason: "Secure initial Master Admin internal access.",
+            configuredById: created.id,
+            configuredAt: new Date(),
+          },
+        });
+      }
       return {
         status: "master-ready" as const,
         created: true,
@@ -58,11 +84,11 @@ export async function ensureInitialMasterAccount(database: DatabaseClient, rawEm
     }
   }
 
-  if (user.role !== "SUPER_ADMIN" || !user.emailVerifiedAt) {
+  if (user.role !== "MASTER_ADMIN" || !user.emailVerifiedAt) {
     const updateData = user.emailVerifiedAt
-      ? { role: "SUPER_ADMIN" as const }
+      ? { role: "MASTER_ADMIN" as const }
       : {
-          role: "SUPER_ADMIN" as const,
+          role: "MASTER_ADMIN" as const,
           emailVerifiedAt: new Date(),
           passwordHash: await hash(randomBytes(48).toString("base64url"), env.BCRYPT_ROUNDS),
         };
@@ -78,12 +104,37 @@ export async function ensureInitialMasterAccount(database: DatabaseClient, rawEm
           resourceType: "User",
           resourceId: user.id,
           metadata: {
-            method: "INITIAL_ADMIN_EMAIL",
+            method: "MASTER_ADMIN_EMAIL",
             passwordResetRequired: !user.emailVerifiedAt,
           },
         },
       }),
     ]);
+  }
+  const tenant = await ensurePersonalTenant(database, {
+    id: user.id,
+    name: "Master Admin",
+    role: "MASTER_ADMIN",
+  });
+  if (tenant) {
+    await database.aiBudget.upsert({
+      where: { tenantId: tenant.id },
+      create: {
+        tenantId: tenant.id,
+        mode: "INTERNAL_UNLIMITED",
+        monthlyRequestLimit: 0,
+        manualOverrideReason: "Secure initial Master Admin internal access.",
+        configuredById: user.id,
+        configuredAt: new Date(),
+      },
+      update: {
+        mode: "INTERNAL_UNLIMITED",
+        monthlyRequestLimit: 0,
+        manualOverrideReason: "Secure initial Master Admin internal access.",
+        configuredById: user.id,
+        configuredAt: new Date(),
+      },
+    });
   }
   return {
     status: "master-ready" as const,

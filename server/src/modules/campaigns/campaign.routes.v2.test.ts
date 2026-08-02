@@ -25,6 +25,7 @@ function appFor(database: DatabaseClient, redis: RedisClient | null, emailServic
   app.use((req, _res, next) => {
     req.id = "request-1";
     req.user = { id: "user-1", email: "user@example.com", role: "USER" };
+    req.tenant = { id: "tenant-1", name: "Test workspace", status: "ACTIVE", kind: "CUSTOMER", role: "TENANT_ADMIN" };
     next();
   });
   app.use(createCampaignRouter(database, redis, emailService));
@@ -35,6 +36,7 @@ function appFor(database: DatabaseClient, redis: RedisClient | null, emailServic
 const now = new Date("2026-07-26T12:00:00.000Z");
 const baseCampaign = {
   id: "campaign-1",
+  tenantId: "tenant-1",
   userId: "user-1",
   idealCustomerProfileId: null,
   name: "Grounded campaign",
@@ -59,6 +61,7 @@ const baseCampaign = {
 };
 const baseMessage = {
   id: "message-1",
+  tenantId: "tenant-1",
   userId: "user-1",
   campaignId: "campaign-1",
   recipientId: "recipient-1",
@@ -109,7 +112,7 @@ function fixture() {
       count: vi.fn().mockResolvedValue(0),
     },
     campaignRecipient: {
-      findFirst: vi.fn().mockResolvedValue({ id: "recipient-1", campaignId: "campaign-1" }),
+      findFirst: vi.fn().mockResolvedValue({ id: "recipient-1", tenantId: "tenant-1", campaignId: "campaign-1" }),
       findMany: vi.fn().mockResolvedValue([{ id: "recipient-1" }]),
       upsert: vi.fn().mockResolvedValue({ id: "recipient-1" }),
       update: vi.fn().mockResolvedValue({}),
@@ -124,6 +127,7 @@ function fixture() {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     company: {},
+    companyProfile: { findFirst: vi.fn().mockResolvedValue(null) },
     userSettings: { findUnique: vi.fn().mockResolvedValue({ aiProvider: "GROQ", signature: "Sam", unsubscribeFooter: "Reply unsubscribe to opt out.", campaignDailyLimit: 25 }) },
     optOut: {
       findUnique: vi.fn().mockResolvedValue(null),
@@ -203,7 +207,7 @@ describe("campaign routes", () => {
     const response = await request(appFor(database, redis, emailService)).post("/campaign-1/drafts").send({ confirm: true });
     expect(response.status).toBe(201);
     expect(response.body.data).toMatchObject({ created: 1, status: "READY_FOR_REVIEW" });
-    expect(methods.campaignMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ evidenceIds: ["ev-1", "ev-2"], promptVersion: "v2-grounded-email-1" }) }));
+    expect(methods.campaignMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ evidenceIds: ["ev-1", "ev-2"], promptVersion: "v3-company-knowledge-grounded-email-1" }) }));
   });
 
   it("skips drafting without evidence and refuses non-Groq generation", async () => {
@@ -277,7 +281,7 @@ describe("campaign routes", () => {
   it("stops future messages on reply and opt-out and creates a human task", async () => {
     const { database, methods, redis, emailService } = fixture();
     const app = appFor(database, redis, emailService);
-    const reply = await request(app).post("/recipients/recipient-1/replies").send({ providerReplyId: "reply-provider-1", contentPreview: "Interested", classification: "UNCLASSIFIED" });
+    const reply = await request(app).post("/recipients/recipient-1/replies").send({ providerReplyId: "reply-provider-1", contentPreview: "Interested", classification: "INTERESTED" });
     expect(reply.body.data.automationStopped).toBe(true);
     expect(methods.task.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ title: "Human response required." }) }));
     const optOut = await request(app).post("/opt-outs").send({ email: "alex@example.com", source: "RECIPIENT", reason: "Requested" });

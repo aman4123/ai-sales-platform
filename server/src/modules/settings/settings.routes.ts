@@ -40,6 +40,69 @@ const deleteAccountSchema = z.object({
   confirm: z.literal("DELETE"),
   email: z.string().trim().toLowerCase().email().max(254),
 });
+const shortList = z.array(z.string().trim().min(1).max(500)).max(100).default([]);
+const profileSchema = z.object({
+  companyName: z.string().trim().min(2).max(160),
+  website: z.union([z.string().trim().url().max(2_000), z.literal("")]).default(""),
+  industry: z.string().trim().max(160).default(""),
+  description: z.string().trim().max(5_000).default(""),
+  products: shortList,
+  services: shortList,
+  useCases: shortList,
+  pricingSummary: z.string().trim().max(2_000).default(""),
+  targetIndustries: shortList,
+  targetCompanySizes: shortList,
+  targetJobTitles: shortList,
+  targetLocations: shortList,
+  exclusions: shortList,
+  valuePropositions: shortList,
+  competitors: shortList,
+  caseStudies: z.array(z.object({
+    title: z.string().trim().min(1).max(200),
+    summary: z.string().trim().min(1).max(2_000),
+    sourceUrl: z.string().trim().url().max(2_000).optional(),
+  })).max(50).default([]),
+  testimonials: z.array(z.object({
+    quote: z.string().trim().min(1).max(2_000),
+    attribution: z.string().trim().max(200).default(""),
+    sourceUrl: z.string().trim().url().max(2_000).optional(),
+  })).max(50).default([]),
+  faqs: z.array(z.object({
+    question: z.string().trim().min(1).max(500),
+    answer: z.string().trim().min(1).max(3_000),
+  })).max(100).default([]),
+  commonObjections: z.array(z.object({
+    objection: z.string().trim().min(1).max(500),
+    approvedResponse: z.string().trim().min(1).max(3_000),
+  })).max(100).default([]),
+  knowledgeSources: z.array(z.object({
+    title: z.string().trim().min(1).max(200),
+    url: z.string().trim().url().max(2_000),
+    type: z.enum(["WEBSITE", "DOCUMENT", "CASE_STUDY", "FAQ", "OTHER"]),
+  })).max(100).default([]),
+  preferredTone: z.enum(["Professional", "Friendly", "Formal", "Concise", "Consultative"]),
+  complianceRequirements: shortList,
+  contactDetails: z.object({
+    email: z.union([z.string().trim().email().max(254), z.literal("")]).default(""),
+    phone: z.string().trim().max(80).default(""),
+    address: z.string().trim().max(500).default(""),
+  }),
+  meetingPreferences: z.object({
+    timezone: z.string().trim().max(80).default("UTC"),
+    schedulingUrl: z.union([z.string().trim().url().max(2_000), z.literal("")]).default(""),
+    assignedCloser: z.string().trim().max(160).default(""),
+  }),
+});
+
+function requireProfileEditor(request: { tenant?: { role: string } }) {
+  if (!request.tenant || !["TENANT_ADMIN", "SALES_MANAGER"].includes(request.tenant.role)) {
+    throw new AppError(
+      403,
+      "COMPANY_PROFILE_EDIT_FORBIDDEN",
+      "Tenant Admin or Sales Manager access is required to edit company knowledge.",
+    );
+  }
+}
 
 function serializeSettings(
   user: { id: string; name: string; email: string },
@@ -169,6 +232,141 @@ export function createSettingsRouter(database: DatabaseClient) {
     });
 
     response.json({ data: { settings: result } });
+  });
+
+  router.get("/company-profile", async (request, response) => {
+    if (!request.tenant) {
+      throw new AppError(409, "TENANT_CONTEXT_REQUIRED", "A company workspace is required.");
+    }
+    const profile = await database.companyProfile.findUnique({
+      where: { tenantId: request.tenant.id },
+    });
+    response.json({
+      data: {
+        profile: profile ?? {
+          tenantId: request.tenant.id,
+          status: "DRAFT",
+          version: 0,
+          companyName: "",
+          website: "",
+          industry: "",
+          description: "",
+          products: [],
+          services: [],
+          useCases: [],
+          pricingSummary: "",
+          targetIndustries: [],
+          targetCompanySizes: [],
+          targetJobTitles: [],
+          targetLocations: [],
+          exclusions: [],
+          valuePropositions: [],
+          competitors: [],
+          caseStudies: [],
+          testimonials: [],
+          faqs: [],
+          commonObjections: [],
+          knowledgeSources: [],
+          preferredTone: "Professional",
+          complianceRequirements: [],
+          contactDetails: { email: "", phone: "", address: "" },
+          meetingPreferences: { timezone: "UTC", schedulingUrl: "", assignedCloser: "" },
+          approvedAt: null,
+          updatedAt: null,
+        },
+      },
+    });
+  });
+
+  router.put("/company-profile", async (request, response) => {
+    requireProfileEditor(request);
+    const input = profileSchema.parse(request.body);
+    const tenantId = request.tenant!.id;
+    const data = {
+      companyName: input.companyName,
+      website: input.website || null,
+      industry: input.industry || null,
+      description: input.description || null,
+      products: input.products,
+      services: input.services,
+      useCases: input.useCases,
+      pricingSummary: input.pricingSummary || null,
+      targetIndustries: input.targetIndustries,
+      targetCompanySizes: input.targetCompanySizes,
+      targetJobTitles: input.targetJobTitles,
+      targetLocations: input.targetLocations,
+      exclusions: input.exclusions,
+      valuePropositions: input.valuePropositions,
+      competitors: input.competitors,
+      caseStudies: input.caseStudies,
+      testimonials: input.testimonials,
+      faqs: input.faqs,
+      commonObjections: input.commonObjections,
+      knowledgeSources: input.knowledgeSources,
+      preferredTone: input.preferredTone,
+      complianceRequirements: input.complianceRequirements,
+      contactDetails: input.contactDetails,
+      meetingPreferences: input.meetingPreferences,
+      status: "DRAFT" as const,
+      approvedAt: null,
+      approvedById: null,
+    };
+    const profile = await database.companyProfile.upsert({
+      where: { tenantId },
+      create: { tenantId, ...data },
+      update: { ...data, version: { increment: 1 } },
+    });
+    await database.auditLog.create({
+      data: {
+        actorUserId: request.user!.id,
+        tenantId,
+        action: "COMPANY_PROFILE_UPDATED",
+        resourceType: "CompanyProfile",
+        resourceId: profile.id,
+        requestId: request.id,
+        metadata: { version: profile.version, status: profile.status },
+      },
+    });
+    response.json({ data: { profile } });
+  });
+
+  router.post("/company-profile/approve", async (request, response) => {
+    requireProfileEditor(request);
+    z.object({ confirm: z.literal(true) }).parse(request.body);
+    const tenantId = request.tenant!.id;
+    const existing = await database.companyProfile.findUnique({ where: { tenantId } });
+    if (
+      !existing
+      || !existing.companyName
+      || existing.products.length + existing.services.length === 0
+      || existing.valuePropositions.length === 0
+    ) {
+      throw new AppError(
+        422,
+        "COMPANY_PROFILE_INCOMPLETE",
+        "Add a company name, at least one product or service, and a value proposition before approval.",
+      );
+    }
+    const profile = await database.companyProfile.update({
+      where: { tenantId },
+      data: {
+        status: "APPROVED",
+        approvedAt: new Date(),
+        approvedById: request.user!.id,
+      },
+    });
+    await database.auditLog.create({
+      data: {
+        actorUserId: request.user!.id,
+        tenantId,
+        action: "COMPANY_PROFILE_APPROVED",
+        resourceType: "CompanyProfile",
+        resourceId: profile.id,
+        requestId: request.id,
+        metadata: { version: profile.version },
+      },
+    });
+    response.json({ data: { profile } });
   });
 
   router.delete("/account", async (request, response) => {

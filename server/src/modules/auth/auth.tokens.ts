@@ -4,28 +4,31 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { UnauthorizedError } from "../../lib/errors.js";
 
-export type UserRole = "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN";
+export type UserRole = "ADMIN" | "MEMBER" | "USER" | "SUPER_ADMIN" | "MASTER_ADMIN";
 export type AccessMode = "USER" | "TESTER" | "MASTER_ADMIN";
 
 export interface AccountUser {
   id: string;
   email: string;
   role: UserRole;
+  name?: string;
 }
 
 export interface AuthenticatedUser extends AccountUser {
   accountRole: UserRole;
   accessMode: AccessMode;
   sessionId?: string;
+  tenantId?: string;
 }
 
 const accessPayloadSchema = z.object({
   sub: z.string().min(1),
   email: z.string().email(),
-  role: z.enum(["ADMIN", "MEMBER", "USER", "SUPER_ADMIN"]),
-  accountRole: z.enum(["ADMIN", "MEMBER", "USER", "SUPER_ADMIN"]).optional(),
+  role: z.enum(["ADMIN", "MEMBER", "USER", "SUPER_ADMIN", "MASTER_ADMIN"]),
+  accountRole: z.enum(["ADMIN", "MEMBER", "USER", "SUPER_ADMIN", "MASTER_ADMIN"]).optional(),
   accessMode: z.enum(["USER", "TESTER", "MASTER_ADMIN"]).optional(),
   sid: z.string().min(1).optional(),
+  tid: z.string().min(1).optional(),
   type: z.literal("access"),
 });
 
@@ -39,28 +42,33 @@ export function testerModesEnabled() {
   return env.NODE_ENV !== "production" || env.TESTER_MODE_ENABLED;
 }
 
+export function isMasterAccount(role: UserRole): boolean {
+  return role === "MASTER_ADMIN" || role === "SUPER_ADMIN";
+}
+
 export function defaultAccessMode(role: UserRole): AccessMode {
-  return role === "SUPER_ADMIN" ? "MASTER_ADMIN" : "USER";
+  return isMasterAccount(role) ? "MASTER_ADMIN" : "USER";
 }
 
 export function availableAccessModes(role: UserRole): AccessMode[] {
-  if (role !== "SUPER_ADMIN") return [];
+  if (!isMasterAccount(role)) return [];
   return testerModesEnabled()
     ? ["USER", "TESTER", "MASTER_ADMIN"]
     : ["MASTER_ADMIN"];
 }
 
 export function effectiveRole(role: UserRole, accessMode: AccessMode): UserRole {
-  if (role !== "SUPER_ADMIN") return role;
+  if (!isMasterAccount(role)) return role;
   if (accessMode === "USER") return "USER";
   if (accessMode === "TESTER") return "ADMIN";
-  return "SUPER_ADMIN";
+  return role;
 }
 
 export function signAccessToken(
   user: AccountUser,
   sessionId?: string,
   requestedMode: AccessMode = defaultAccessMode(user.role),
+  tenantId?: string,
 ): string {
   const accessMode = availableAccessModes(user.role).includes(requestedMode)
     ? requestedMode
@@ -72,6 +80,7 @@ export function signAccessToken(
       accountRole: user.role,
       accessMode,
       ...(sessionId ? { sid: sessionId } : {}),
+      ...(tenantId ? { tid: tenantId } : {}),
       type: "access",
     },
     env.JWT_ACCESS_SECRET,
@@ -118,6 +127,7 @@ export function verifyAccessToken(token: string): AuthenticatedUser {
       accountRole,
       accessMode,
       ...(payload.sid ? { sessionId: payload.sid } : {}),
+      ...(payload.tid ? { tenantId: payload.tid } : {}),
     };
   } catch {
     throw new UnauthorizedError("The access token is invalid or expired.");

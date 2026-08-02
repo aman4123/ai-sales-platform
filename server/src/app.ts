@@ -12,13 +12,20 @@ import { logger, safeRequestPath } from "./lib/logger.js";
 import { createMetrics } from "./lib/metrics.js";
 import type { DatabaseClient } from "./lib/prisma.js";
 import type { RedisClient } from "./lib/redis.js";
-import { requireAdmin, requireAuth } from "./middleware/auth.js";
+import {
+  requireActiveSession,
+  requireAdmin,
+  requireAuth,
+  resolveSupportContext,
+  resolveTenantContext,
+} from "./middleware/auth.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { createRateLimiters, requestId } from "./middleware/request-security.js";
 import { createAiRouter, createDemoAiRouter } from "./modules/ai/ai.routes.js";
 import { createAdminRouter } from "./modules/admin/admin.routes.js";
 import { createAuthRouter } from "./modules/auth/auth.routes.js";
 import { createCampaignRouter } from "./modules/campaigns/campaign.routes.js";
+import { createUnsubscribeRouter } from "./modules/campaigns/unsubscribe.routes.js";
 import { createCommandRouter } from "./modules/command/command.routes.js";
 import { createCrmRouter } from "./modules/crm/crm.routes.js";
 import { createHealthRouter } from "./modules/health/health.routes.js";
@@ -27,6 +34,7 @@ import { createLeadRouter } from "./modules/leads/lead.routes.js";
 import { createOperationsRouter } from "./modules/operations/operations.routes.js";
 import { createReportRouter } from "./modules/reports/report.routes.js";
 import { createResearchRouter } from "./modules/research/research.routes.js";
+import { createSalesDepartmentRouter } from "./modules/sales/sales-department.routes.js";
 import { createSettingsRouter } from "./modules/settings/settings.routes.js";
 import { createEmailWebhookRouter } from "./modules/webhooks/email-webhook.routes.js";
 
@@ -115,23 +123,36 @@ export function createApp({ database, redis = null, emailService, serveStatic }:
   app.use("/api/health", createHealthRouter(database, redis));
   app.use("/api/auth", createAuthRouter(database, accountEmail, rateLimiters));
   app.use("/api/webhooks/email", createEmailWebhookRouter(database));
+  app.use("/api/unsubscribe", createUnsubscribeRouter(database));
   app.use("/api/ai/demo", rateLimiters.ai, createDemoAiRouter());
-  app.use("/api/leads", requireAuth, createLeadRouter(database));
-  app.use("/api/crm", requireAuth, createCrmRouter(database));
-  app.use("/api/command", requireAuth, createCommandRouter(database));
-  app.use("/api/operations", requireAuth, createOperationsRouter(database));
-  app.use("/api/settings", requireAuth, createSettingsRouter(database));
-  app.use("/api/reports", requireAuth, createReportRouter(database));
-  app.use("/api/icps", requireAuth, createIcpRouter(database));
+  const authenticated = [
+    requireAuth,
+    requireActiveSession(database),
+    resolveSupportContext(database),
+    resolveTenantContext(database),
+  ];
+  app.use("/api/leads", ...authenticated, createLeadRouter(database));
+  app.use("/api/crm", ...authenticated, createCrmRouter(database));
+  app.use("/api/command", ...authenticated, createCommandRouter(database));
+  app.use("/api/operations", ...authenticated, createOperationsRouter(database));
+  app.use("/api/settings", ...authenticated, createSettingsRouter(database));
+  app.use("/api/reports", ...authenticated, createReportRouter(database));
+  app.use("/api/sales-department", ...authenticated, createSalesDepartmentRouter(database));
+  app.use("/api/icps", ...authenticated, createIcpRouter(database));
   app.use(
     "/api/campaigns",
-    requireAuth,
+    ...authenticated,
     rateLimiters.ai,
     createCampaignRouter(database, redis, accountEmail),
   );
-  app.use("/api/research", requireAuth, rateLimiters.ai, createResearchRouter(database, redis));
-  app.use("/api/ai", requireAuth, rateLimiters.ai, createAiRouter(database, redis));
-  app.use("/api/admin", requireAuth, requireAdmin, createAdminRouter(database));
+  app.use("/api/research", ...authenticated, rateLimiters.ai, createResearchRouter(database, redis));
+  app.use("/api/ai", ...authenticated, rateLimiters.ai, createAiRouter(database, redis));
+  app.use(
+    "/api/admin",
+    ...authenticated,
+    requireAdmin,
+    createAdminRouter(database, accountEmail, redis),
+  );
 
   app.use("/api", notFoundHandler);
 

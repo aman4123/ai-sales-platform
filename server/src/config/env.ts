@@ -136,7 +136,17 @@ const envSchema = z.object({
   ),
   OUTBOUND_DAILY_LIMIT: z.coerce.number().int().min(1).max(1_000).default(25),
   OUTBOUND_FOLLOW_UP_LIMIT: z.coerce.number().int().min(0).max(3).default(2),
+  PLATFORM_RECIPIENT_DAILY_LIMIT: z.coerce.number().int().min(1).max(100).default(3),
+  PLATFORM_RECIPIENT_MONTHLY_LIMIT: z.coerce.number().int().min(1).max(500).default(12),
+  PLATFORM_RECIPIENT_COOLDOWN_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  PLATFORM_DOMAIN_DAILY_LIMIT: z.coerce.number().int().min(1).max(10_000).default(50),
+  PLATFORM_DOMAIN_MONTHLY_LIMIT: z.coerce.number().int().min(1).max(100_000).default(500),
   EMAIL_WEBHOOK_SECRET: optionalSecret,
+  MASTER_ADMIN_EMAIL: z.preprocess(
+    (value) => (value === "" ? undefined : value),
+    z.string().trim().toLowerCase().email().optional(),
+  ),
+  // Backward-compatible alias. New deployments should use MASTER_ADMIN_EMAIL.
   INITIAL_ADMIN_EMAIL: z.preprocess(
     (value) => (value === "" ? undefined : value),
     z.string().trim().toLowerCase().email().optional(),
@@ -145,6 +155,7 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((value) => value === "true"),
+  AUTOMATION_POLL_INTERVAL_MS: z.coerce.number().int().min(1_000).max(60_000).default(5_000),
   MAINTENANCE_INTERVAL_MS: z.coerce.number().int().min(60_000).max(86_400_000).default(21_600_000),
 }).superRefine((configuration, context) => {
   const placeholderPattern = /replace-with|change-me|changeme/i;

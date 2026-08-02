@@ -28,7 +28,7 @@ describe("initial Master Admin assignment", () => {
       accountId: "user-1",
     });
     expect(fixture.transaction).toHaveBeenCalledTimes(1);
-    expect(fixture.update).toHaveBeenCalledWith({ where: { id: "user-1" }, data: { role: "SUPER_ADMIN" } });
+    expect(fixture.update).toHaveBeenCalledWith({ where: { id: "user-1" }, data: { role: "MASTER_ADMIN" } });
     expect(fixture.createAudit).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ action: "INITIAL_MASTER_ADMIN_ASSIGNED", actorUserId: "user-1" }),
     }));
@@ -47,13 +47,13 @@ describe("initial Master Admin assignment", () => {
       data: {
         emailVerifiedAt: expect.any(Date),
         passwordHash: expect.any(String),
-        role: "SUPER_ADMIN",
+        role: "MASTER_ADMIN",
       },
     });
     expect(fixture.createAudit).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         action: "INITIAL_MASTER_ADMIN_ASSIGNED",
-        metadata: { method: "INITIAL_ADMIN_EMAIL", passwordResetRequired: true },
+        metadata: { method: "MASTER_ADMIN_EMAIL", passwordResetRequired: true },
       }),
     }));
   });
@@ -72,7 +72,7 @@ describe("initial Master Admin assignment", () => {
         emailVerifiedAt: expect.any(Date),
         name: "Master Tester",
         passwordHash: expect.any(String),
-        role: "SUPER_ADMIN",
+        role: "MASTER_ADMIN",
         settings: { create: {} },
       }),
       select: { id: true },
@@ -83,7 +83,7 @@ describe("initial Master Admin assignment", () => {
   });
 
   it("is idempotent for an existing Master Admin", async () => {
-    const fixture = databaseFor({ id: "master-1", emailVerifiedAt: new Date(), role: "SUPER_ADMIN" });
+    const fixture = databaseFor({ id: "master-1", emailVerifiedAt: new Date(), role: "MASTER_ADMIN" });
     await expect(ensureInitialMasterAccount(fixture.database, "master@example.test")).resolves.toMatchObject({ created: false });
     expect(fixture.transaction).not.toHaveBeenCalled();
   });

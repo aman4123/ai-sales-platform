@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "../../config/env.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import { errorHandler } from "../../middleware/error-handler.js";
-import { createEmailWebhookRouter } from "./email-webhook.routes.js";
+import { classifyReplyText, createEmailWebhookRouter } from "./email-webhook.routes.js";
 
 function appFor(database: DatabaseClient) {
   const app = express();
@@ -136,5 +136,35 @@ describe("email provider webhook", () => {
       expect(transaction.reply.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ contentPreview: null, providerReplyId: "postmark:event-REPLIED" }) }));
       expect(transaction.task.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ title: "Human response required." }) }));
     }
+  });
+
+  it.each([
+    ["Yes, I am interested.", "INTERESTED"],
+    ["Could we schedule a demo next week?", "MEETING_REQUEST"],
+    ["What does the product integrate with?", "PRODUCT_QUESTION"],
+    ["How much does it cost?", "PRICING_QUESTION"],
+    ["Please unsubscribe me.", "UNSUBSCRIBE"],
+    ["Automatic reply: I am out of office.", "OUT_OF_OFFICE"],
+    ["Delivery failed: mailbox does not exist.", "BOUNCE"],
+    [undefined, "UNKNOWN"],
+  ])("classifies normalized reply content without AI invention: %s", (content, classification) => {
+    expect(classifyReplyText(content)).toBe(classification);
+  });
+
+  it("stores a bounded classification and creates a meeting handoff task", async () => {
+    const { database, transaction } = fixture();
+    const response = await postEvent(database, "smtp", {
+      ...event,
+      providerEventId: "meeting-reply",
+      type: "REPLIED",
+      contentPreview: "Could we schedule a demo next week?",
+    });
+    expect(response.status).toBe(202);
+    expect(transaction.reply.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ classification: "MEETING_REQUEST", requiresHuman: true }),
+    }));
+    expect(transaction.task.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ title: "Meeting scheduling required." }),
+    }));
   });
 });

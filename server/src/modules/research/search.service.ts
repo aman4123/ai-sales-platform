@@ -41,6 +41,58 @@ export async function consumeSearchBudget(
   }
 }
 
+async function consumeTenantSearchBudget(
+  redis: RedisClient,
+  tenantId: string,
+  provider: string,
+  monthlyLimit: number,
+  now = new Date(),
+) {
+  if (monthlyLimit < 1) {
+    throw new AppError(
+      503,
+      "TENANT_SEARCH_BUDGET_NOT_CONFIGURED",
+      "Live search is disabled for this company until a Master Admin configures a research budget.",
+    );
+  }
+  const month = now.toISOString().slice(0, 7);
+  const tenantFingerprint = createHash("sha256").update(tenantId).digest("hex").slice(0, 24);
+  const key = `budget:search:tenant:${tenantFingerprint}:${provider.toLowerCase()}:${month}`;
+  const count = Number(await redis.sendCommand(["INCR", key]));
+  if (!Number.isSafeInteger(count) || count < 1) {
+    throw new AppError(503, "SEARCH_BUDGET_UNAVAILABLE", "The search budget guard is unavailable.");
+  }
+  if (count === 1) {
+    const expiresAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1) / 1_000;
+    await redis.sendCommand(["EXPIREAT", key, String(expiresAt)]);
+  }
+  if (count > monthlyLimit) {
+    throw new AppError(429, "TENANT_SEARCH_MONTHLY_LIMIT_REACHED", "This company's monthly research limit has been reached.");
+  }
+}
+
+async function resolveTenantSearchLimit(database: DatabaseClient, tenantId: string) {
+  const candidate = database as unknown as {
+    subscription?: { findUnique?: unknown };
+    aiBudget?: { findUnique?: unknown };
+  };
+  if (
+    typeof candidate.subscription?.findUnique !== "function"
+    || typeof candidate.aiBudget?.findUnique !== "function"
+  ) {
+    return null;
+  }
+  const [subscription, budget] = await Promise.all([
+    database.subscription.findUnique({
+      where: { tenantId },
+      select: { plan: { select: { researchMonthlyLimit: true } } },
+    }),
+    database.aiBudget.findUnique({ where: { tenantId }, select: { mode: true } }),
+  ]);
+  if (budget?.mode === "INTERNAL_UNLIMITED") return env.SEARCH_MONTHLY_REQUEST_LIMIT;
+  return Math.min(subscription?.plan.researchMonthlyLimit ?? 0, env.SEARCH_MONTHLY_REQUEST_LIMIT);
+}
+
 function cachedResponse(value: unknown): SearchResponse | null {
   if (typeof value !== "string") return null;
   try {
@@ -56,6 +108,7 @@ export async function executeVerifiedSearch(
   redis: RedisClient | null,
   userId: string,
   query: string,
+  tenantId: string,
 ): Promise<SearchResponse & { cached: boolean }> {
   const provider = createSearchProvider();
   if (!provider) {
@@ -73,11 +126,18 @@ export async function executeVerifiedSearch(
   }
 
   await consumeSearchBudget(redis, provider.name);
+  const tenantLimit = await resolveTenantSearchLimit(database, tenantId);
+  if (tenantLimit !== null) {
+    if (!redis) {
+      throw new AppError(503, "SEARCH_BUDGET_UNAVAILABLE", "The search budget guard is unavailable.");
+    }
+    await consumeTenantSearchBudget(redis, tenantId, provider.name, tenantLimit);
+  }
   const result = await provider.search(query, { limit: env.SEARCH_RESULT_LIMIT });
   const month = new Date().toISOString().slice(0, 7);
   await database.searchUsage.upsert({
-    where: { userId_provider_month: { userId, provider: provider.name, month } },
-    create: { userId, provider: provider.name, month, count: 1 },
+    where: { tenantId_provider_month: { tenantId, provider: provider.name, month } },
+    create: { userId, tenantId, provider: provider.name, month, count: 1 },
     update: { count: { increment: 1 } },
   });
 

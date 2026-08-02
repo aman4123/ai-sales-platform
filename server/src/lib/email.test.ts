@@ -136,10 +136,18 @@ describe("transactional email adapter", () => {
     vi.stubEnv("OUTBOUND_TEST_RECIPIENT", "allowed@example.test");
     const { createEmailService } = await import("./email.js");
     const service = createEmailService();
-    const message = { subject: "Subject", greeting: "Hello,", body: "Grounded body", cta: "Reply if useful.", closing: "Regards,", signature: "Sales User", unsubscribeFooter: "Reply unsubscribe to opt out." };
+    const message = { senderDisplayName: "Ava — AI Sales Representative", senderEmail: "ava@example.test", replyTo: "ava@example.test", subject: "Subject", greeting: "Hello,", body: "Grounded body", cta: "Reply if useful.", closing: "Regards,", signature: "Sales User", unsubscribeFooter: "Reply unsubscribe to opt out.", unsubscribeUrl: "https://sales.example.com/api/unsubscribe?token=signed" };
 
     await service.sendCampaign?.({ ...message, to: "allowed@example.test" });
     await expect(service.sendCampaign?.({ ...message, to: "blocked@example.test" })).rejects.toThrow("outside the allowlist");
     expect(sendMail).toHaveBeenCalledTimes(1);
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({
+      from: { name: "Ava — AI Sales Representative", address: "ava@example.test" },
+      replyTo: "ava@example.test",
+      headers: {
+        "List-Unsubscribe": "<mailto:ava@example.test?subject=unsubscribe>, <https://sales.example.com/api/unsubscribe?token=signed>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+    }));
   });
 });

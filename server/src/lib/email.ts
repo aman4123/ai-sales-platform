@@ -16,6 +16,9 @@ interface AccountNoticeInput {
 
 export interface CampaignEmailInput {
   to: string;
+  senderDisplayName: string;
+  senderEmail: string;
+  replyTo: string;
   subject: string;
   greeting: string;
   body: string;
@@ -23,6 +26,7 @@ export interface CampaignEmailInput {
   closing: string;
   signature: string;
   unsubscribeFooter: string;
+  unsubscribeUrl: string;
 }
 
 export interface EmailService {
@@ -142,6 +146,7 @@ class AccountEmailService implements EmailService {
       input.signature,
       "",
       input.unsubscribeFooter,
+      `Unsubscribe: ${input.unsubscribeUrl}`,
     ]
       .filter((line, index, values) => line || values[index - 1] !== "")
       .join("\n");
@@ -151,10 +156,17 @@ class AccountEmailService implements EmailService {
       `<p>${escapeHtml(input.cta)}</p>`,
       `<p>${escapeHtml(input.closing)}<br>${escapeHtml(input.signature).replace(/\n/g, "<br>")}</p>`,
       `<p>${escapeHtml(input.unsubscribeFooter)}</p>`,
+      `<p><a href="${escapeHtml(input.unsubscribeUrl)}">Unsubscribe</a></p>`,
     ].join("");
     await this.send({
       kind: "approved_campaign",
       to: input.to,
+      from: { name: input.senderDisplayName, address: input.senderEmail },
+      replyTo: input.replyTo,
+      headers: {
+        "List-Unsubscribe": `<mailto:${input.replyTo}?subject=unsubscribe>, <${input.unsubscribeUrl}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
       subject: input.subject,
       text,
       html,
@@ -167,6 +179,9 @@ class AccountEmailService implements EmailService {
     subject: string;
     text: string;
     html: string;
+    from?: { name: string; address: string };
+    replyTo?: string;
+    headers?: Record<string, string>;
   }) {
     if (env.EMAIL_DELIVERY_MODE === "log") {
       logger.info(
@@ -186,7 +201,9 @@ class AccountEmailService implements EmailService {
             "content-type": "application/json",
           },
           body: JSON.stringify({
-            from: `AI Sales Platform <${env.EMAIL_FROM}>`,
+            from: input.from ? `${input.from.name} <${input.from.address}>` : `AI Sales Platform <${env.EMAIL_FROM}>`,
+            ...(input.replyTo ? { reply_to: input.replyTo } : {}),
+            ...(input.headers ? { headers: input.headers } : {}),
             to: [input.to],
             subject: input.subject,
             text: input.text,
@@ -204,7 +221,9 @@ class AccountEmailService implements EmailService {
       }
     } else {
       await this.transporter!.sendMail({
-        from: { name: "AI Sales Platform", address: env.EMAIL_FROM },
+        from: input.from ?? { name: "AI Sales Platform", address: env.EMAIL_FROM },
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(input.headers ? { headers: input.headers } : {}),
         to: input.to,
         subject: input.subject,
         text: input.text,

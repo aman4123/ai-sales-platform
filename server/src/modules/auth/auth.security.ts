@@ -16,6 +16,8 @@ import {
   type AccountUser,
   type UserRole,
 } from "./auth.tokens.js";
+import { ensureTenantForAccessMode } from "../tenancy/tenant.service.js";
+import type { TenantContext } from "../tenancy/tenant.service.js";
 
 export const REFRESH_COOKIE = "refresh_token";
 export const DUMMY_PASSWORD_HASH = "$2b$12$O5II/e8N4LcE1ViEFk8H7OBtPzFZ7hKjfa32SD1HBXlwNtIf8iS6u";
@@ -90,6 +92,7 @@ export interface UserWithSettings {
 export function serializeUser(
   user: UserWithSettings,
   requestedMode: AccessMode = defaultAccessMode(user.role),
+  tenant?: TenantContext | null,
 ) {
   const settings = user.settings;
   const availableModes = availableAccessModes(user.role);
@@ -105,6 +108,7 @@ export function serializeUser(
     accountRole: user.role,
     accessMode,
     availableModes,
+    tenant: tenant ?? null,
     settings: {
       company: settings?.company ?? "",
       signature: settings?.signature ?? "",
@@ -133,7 +137,7 @@ export function sessionMetadata(request: Request) {
 }
 
 export function authUser(user: UserWithSettings): AccountUser {
-  return { id: user.id, email: user.email, role: user.role };
+  return { id: user.id, email: user.email, role: user.role, name: user.name };
 }
 
 export async function createSession(
@@ -142,12 +146,17 @@ export async function createSession(
   metadata: ReturnType<typeof sessionMetadata>,
   requestedMode: AccessMode = defaultAccessMode(user.role),
 ) {
-  const sessionId = randomUUID();
-  const refreshToken = signRefreshToken(user.id, sessionId);
   const availableModes = availableAccessModes(user.role);
   const accessMode = availableModes.includes(requestedMode)
     ? requestedMode
     : defaultAccessMode(user.role);
+  const tenant = await ensureTenantForAccessMode(database, {
+    id: user.id,
+    name: user.name ?? user.email.split("@")[0] ?? "Personal",
+    role: user.role,
+  }, accessMode);
+  const sessionId = randomUUID();
+  const refreshToken = signRefreshToken(user.id, sessionId);
 
   await database.refreshSession.deleteMany({
     where: { userId: user.id, expiresAt: { lt: new Date() } },
@@ -156,6 +165,7 @@ export async function createSession(
     data: {
       id: sessionId,
       userId: user.id,
+      ...(tenant ? { tenantId: tenant.id } : {}),
       accessMode,
       tokenHash: hashToken(refreshToken),
       expiresAt: new Date(Date.now() + env.JWT_REFRESH_TTL_SECONDS * 1_000),
@@ -163,7 +173,12 @@ export async function createSession(
     },
   });
 
-  return { accessToken: signAccessToken(user, sessionId, accessMode), refreshToken, accessMode };
+  return {
+    accessToken: signAccessToken(user, sessionId, accessMode, tenant?.id),
+    refreshToken,
+    accessMode,
+    tenant,
+  };
 }
 
 export function createOpaqueToken() {
