@@ -105,7 +105,7 @@ services:
       - key: AI_MAX_TOKENS
         value: 1500
       - key: AI_MONTHLY_REQUEST_LIMIT
-        value: 0
+        value: 10
       - key: AI_HISTORY_RETENTION_DAYS
         value: 90
       - key: SEARCH_ENABLED
@@ -119,7 +119,7 @@ services:
       - key: SERPER_API_KEY
         sync: false
       - key: SEARCH_MONTHLY_REQUEST_LIMIT
-        value: 0
+        value: 100
       - key: SEARCH_RESULT_LIMIT
         value: 5
       - key: SEARCH_REQUEST_TIMEOUT_MS
@@ -140,12 +140,26 @@ services:
         value: 25
       - key: OUTBOUND_FOLLOW_UP_LIMIT
         value: 2
+      - key: PLATFORM_RECIPIENT_DAILY_LIMIT
+        value: 3
+      - key: PLATFORM_RECIPIENT_MONTHLY_LIMIT
+        value: 12
+      - key: PLATFORM_RECIPIENT_COOLDOWN_HOURS
+        value: 24
+      - key: PLATFORM_DOMAIN_DAILY_LIMIT
+        value: 50
+      - key: PLATFORM_DOMAIN_MONTHLY_LIMIT
+        value: 500
       - key: EMAIL_WEBHOOK_SECRET
+        sync: false
+      - key: MASTER_ADMIN_EMAIL
         sync: false
       - key: INITIAL_ADMIN_EMAIL
         sync: false
       - key: TESTER_MODE_ENABLED
         value: "false"
+      - key: AUTOMATION_POLL_INTERVAL_MS
+        value: 5000
       - key: MAINTENANCE_INTERVAL_MS
         value: 21600000
 
