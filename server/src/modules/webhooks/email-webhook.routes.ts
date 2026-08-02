@@ -11,6 +11,7 @@ const eventSchema = z.object({
   messageId: z.string().trim().min(1).max(64),
   type: z.enum(["DELIVERED", "BOUNCED", "COMPLAINT", "UNSUBSCRIBED", "REPLIED"]),
   occurredAt: z.coerce.date(),
+  contentPreview: z.string().trim().max(1_000).optional(),
 }).superRefine((event, context) => {
   const age = Date.now() - event.occurredAt.getTime();
   if (age < -5 * 60_000) {
@@ -51,6 +52,25 @@ function emailHash(value: string) {
   return createHash("sha256").update(value.trim().toLowerCase()).digest("hex");
 }
 
+export function classifyReplyText(value: string | undefined) {
+  const text = value?.trim().toLowerCase() ?? "";
+  if (!text) return "UNKNOWN";
+  if (/\b(undeliverable|delivery failed|mailbox (?:does not exist|unavailable)|address rejected|hard bounce)\b/.test(text)) return "BOUNCE";
+  if (/\b(unsubscribe|remove me|stop (?:emailing|contacting)|do not contact)\b/.test(text)) return "UNSUBSCRIBE";
+  if (/\b(spam|complaint|report(?:ed)? you)\b/.test(text)) return "COMPLAINT";
+  if (/\b(out of (?:the )?office|automatic reply|on leave)\b/.test(text)) return "OUT_OF_OFFICE";
+  if (/\b(wrong (?:person|contact)|not the right person)\b/.test(text)) return "WRONG_CONTACT";
+  if (/\b(speak to|contact|forward(?:ed)? to|referr(?:al|ed))\b/.test(text)) return "REFERRAL";
+  if (/\b(price|pricing|cost|how much)\b/.test(text)) return "PRICING_QUESTION";
+  if (/\b(demo|meeting|calendar|schedule|available (?:on|at)|book a call)\b/.test(text)) return "MEETING_REQUEST";
+  if (/\b(how does|what does|feature|integration|product)\b/.test(text) && text.includes("?")) return "PRODUCT_QUESTION";
+  if (/\b(follow up|later|next (?:week|month|quarter)|not now)\b/.test(text)) return "FOLLOW_UP_LATER";
+  if (/\b(not interested|no thanks|no thank you|decline)\b/.test(text)) return "NOT_INTERESTED";
+  if (/\b(concern|objection|already use|contract|security review)\b/.test(text)) return "OBJECTION";
+  if (/\b(interested|sounds good|tell me more|yes|open to)\b/.test(text)) return "INTERESTED";
+  return "UNKNOWN";
+}
+
 export function createEmailWebhookRouter(database: DatabaseClient) {
   const router = Router();
 
@@ -87,9 +107,18 @@ export function createEmailWebhookRouter(database: DatabaseClient) {
 
     try {
       await database.$transaction(async (transaction) => {
+      const replyClassification = input.type === "REPLIED" ? classifyReplyText(input.contentPreview) : null;
+      const operationalType = input.type === "REPLIED" && replyClassification === "UNSUBSCRIBE"
+        ? "UNSUBSCRIBED"
+        : input.type === "REPLIED" && replyClassification === "COMPLAINT"
+          ? "COMPLAINT"
+          : input.type === "REPLIED" && replyClassification === "BOUNCE"
+            ? "BOUNCED"
+            : input.type;
       await transaction.deliveryEvent.create({
         data: {
           userId: message.userId,
+          tenantId: message.tenantId,
           messageId: message.id,
           provider,
           providerEventId: input.providerEventId,
@@ -110,68 +139,97 @@ export function createEmailWebhookRouter(database: DatabaseClient) {
       }
 
       const email = message.recipient.contact?.publicEmail ?? message.recipient.lead?.email ?? null;
-      const stopReason = `PROVIDER_${input.type}`;
+      const stopReason = `PROVIDER_${operationalType}`;
       await transaction.campaignMessage.updateMany({
         where: {
           recipientId: message.recipientId,
           status: { in: ["DRAFT", "APPROVED", "QUEUED", "SENT"] },
         },
         data: {
-          status: input.type === "BOUNCED" ? "BOUNCED" : "CANCELLED",
+          status: operationalType === "BOUNCED" ? "BOUNCED" : "CANCELLED",
           failureReason: stopReason,
-          cancelledAt: input.type === "BOUNCED" ? null : input.occurredAt,
+          cancelledAt: operationalType === "BOUNCED" ? null : input.occurredAt,
         },
       });
       await transaction.campaignRecipient.update({
         where: { id: message.recipientId },
         data: {
           status:
-            input.type === "REPLIED"
+            operationalType === "REPLIED"
               ? "REPLIED"
-              : input.type === "BOUNCED"
+              : operationalType === "BOUNCED"
                 ? "BOUNCED"
                 : "OPTED_OUT",
           stopReason,
-          ...(input.type === "REPLIED" ? { repliedAt: input.occurredAt } : {}),
-          ...(["COMPLAINT", "UNSUBSCRIBED"].includes(input.type)
+          ...(operationalType === "REPLIED" ? { repliedAt: input.occurredAt } : {}),
+          ...(["COMPLAINT", "UNSUBSCRIBED"].includes(operationalType)
             ? { optedOutAt: input.occurredAt }
             : {}),
         },
       });
-      if (email && ["COMPLAINT", "UNSUBSCRIBED"].includes(input.type)) {
+      if (email && ["COMPLAINT", "UNSUBSCRIBED"].includes(operationalType)) {
+        const hashedEmail = emailHash(email);
+        const suppressionData = {
+          source: operationalType === "COMPLAINT" ? "COMPLAINT" : "PROVIDER",
+          reason: stopReason,
+        };
         await transaction.optOut.upsert({
-          where: {
-            userId_emailHash: { userId: message.userId, emailHash: emailHash(email) },
-          },
+          where: { tenantId_emailHash: { tenantId: message.tenantId, emailHash: hashedEmail } },
           create: {
             userId: message.userId,
-            emailHash: emailHash(email),
-            source: input.type === "COMPLAINT" ? "COMPLAINT" : "PROVIDER",
-            reason: stopReason,
+            tenantId: message.tenantId,
+            emailHash: hashedEmail,
+            ...suppressionData,
           },
-          update: { source: input.type === "COMPLAINT" ? "COMPLAINT" : "PROVIDER", reason: stopReason },
+          update: suppressionData,
         });
+        if (
+          operationalType === "COMPLAINT"
+          && typeof (transaction as unknown as { globalRecipientSafety?: { upsert?: unknown } })
+            .globalRecipientSafety?.upsert === "function"
+        ) {
+          const domain = email.trim().toLowerCase().split("@")[1] ?? "unknown";
+          await transaction.globalRecipientSafety.upsert({
+            where: { recipientHash: hashedEmail },
+            create: {
+              recipientHash: hashedEmail,
+              domainHash: emailHash(domain),
+              globallySuppressedAt: input.occurredAt,
+              suppressionReason: "RECIPIENT_COMPLAINT",
+            },
+            update: {
+              globallySuppressedAt: input.occurredAt,
+              suppressionReason: "RECIPIENT_COMPLAINT",
+            },
+          });
+        }
       }
       if (input.type === "REPLIED") {
         await transaction.reply.create({
           data: {
             userId: message.userId,
+            tenantId: message.tenantId,
             recipientId: message.recipientId,
             messageId: message.id,
             providerReplyId: `${provider}:${input.providerEventId}`,
-            contentPreview: null,
+            contentPreview: input.contentPreview ?? null,
+            classification: replyClassification,
+            requiresHuman: !["OUT_OF_OFFICE", "UNSUBSCRIBE", "BOUNCE"].includes(replyClassification ?? "UNKNOWN"),
             receivedAt: input.occurredAt,
           },
         });
-        await transaction.task.create({
-          data: {
-            userId: message.userId,
-            campaignId: message.campaignId,
-            type: "HUMAN_RESPONSE_REQUIRED",
-            title: "Human response required.",
-            description: "A provider reported a recipient reply. Follow-ups were stopped.",
-          },
-        });
+        if (!["OUT_OF_OFFICE", "UNSUBSCRIBE", "BOUNCE"].includes(replyClassification ?? "UNKNOWN")) {
+          await transaction.task.create({
+            data: {
+              userId: message.userId,
+              tenantId: message.tenantId,
+              campaignId: message.campaignId,
+              type: "HUMAN_RESPONSE_REQUIRED",
+              title: replyClassification === "MEETING_REQUEST" ? "Meeting scheduling required." : "Human response required.",
+              description: `A provider reported a ${replyClassification?.toLowerCase().replaceAll("_", " ")} reply. Follow-ups were stopped.`,
+            },
+          });
+        }
       }
       });
     } catch (error) {

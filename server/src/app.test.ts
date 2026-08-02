@@ -16,6 +16,7 @@ const user = {
   emailVerifiedAt: new Date(),
   name: "Sales Admin",
   role: "ADMIN" as const,
+  status: "ACTIVE" as const,
   passwordHash: "$2b$04$Of1eA8z3f7J.KF72H8AQXOFx8SEAfH9/wyrDJlWjoIrfiKAdU3MuK",
   settings: {
     company: "Example Co",
@@ -307,6 +308,10 @@ describe("production API", () => {
       ...user,
       passwordHash: await hash("safe-password-123", 4),
     });
+    mock.user.update.mockResolvedValue({
+      ...user,
+      passwordHash: await hash("safe-password-123", 4),
+    });
     mock.refreshSession.create.mockResolvedValue({});
 
     const response = await request(createApp({ database, serveStatic: false }))
@@ -412,6 +417,19 @@ describe("production API", () => {
   it("lets only a signed Master Admin session switch into Tester Mode", async () => {
     const { database, mock } = createMockDatabase();
     const master = { ...user, role: "SUPER_ADMIN" as const };
+    const testTenant = {
+      id: "test-tenant-1",
+      name: "Internal Tester Workspace",
+      slug: "internal-tester-workspace",
+      status: "ACTIVE" as const,
+      kind: "TEST" as const,
+      memberships: [{ role: "TENANT_ADMIN" as const }],
+    };
+    Object.assign(mock, {
+      tenantMembership: { findFirst: vi.fn().mockResolvedValue(null) },
+      plan: { findUnique: vi.fn().mockResolvedValue(null) },
+      tenant: { create: vi.fn().mockResolvedValue(testTenant) },
+    });
     mock.refreshSession.updateMany.mockResolvedValue({ count: 1 });
     mock.user.findUnique.mockResolvedValue(master);
     mock.auditLog.create.mockResolvedValue({});
@@ -434,7 +452,7 @@ describe("production API", () => {
     });
     expect(mock.refreshSession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({ id: "session-master", userId: master.id }),
-      data: { accessMode: "TESTER" },
+      data: { accessMode: "TESTER", tenantId: "test-tenant-1" },
     }));
   });
 

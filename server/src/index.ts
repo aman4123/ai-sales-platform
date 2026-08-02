@@ -5,12 +5,14 @@ import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import { connectRedisOrFallback, createRedisConnection } from "./lib/redis.js";
 import { startRetentionJob } from "./jobs/retention.js";
+import { startAutomationWorker } from "./jobs/automation.js";
 import { ensureInitialMasterAccount } from "./modules/admin/admin.assignment.js";
 
 const configuredRedis = createRedisConnection();
 let server: Server | null = null;
 let isShuttingDown = false;
 let stopRetentionJob: (() => void) | null = null;
+let stopAutomationWorker: (() => void) | null = null;
 
 async function disconnectDependencies() {
   await Promise.all([
@@ -23,6 +25,7 @@ async function shutdown(signal: string) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   stopRetentionJob?.();
+  stopAutomationWorker?.();
   logger.info({ signal }, "Graceful shutdown started");
 
   const forceExit = setTimeout(() => {
@@ -65,8 +68,9 @@ process.on("uncaughtException", (error) => {
 
 try {
   await prisma.$connect();
-  if (env.INITIAL_ADMIN_EMAIL) {
-    const masterAccount = await ensureInitialMasterAccount(prisma, env.INITIAL_ADMIN_EMAIL);
+  const masterAdminEmail = env.MASTER_ADMIN_EMAIL ?? env.INITIAL_ADMIN_EMAIL;
+  if (masterAdminEmail) {
+    const masterAccount = await ensureInitialMasterAccount(prisma, masterAdminEmail);
     logger.info(
       {
         status: masterAccount.status,
@@ -80,6 +84,7 @@ try {
 
   const app = createApp({ database: prisma, redis: activeRedis });
   stopRetentionJob = startRetentionJob(prisma);
+  stopAutomationWorker = startAutomationWorker(prisma, activeRedis);
   server = createServer(app);
   server.listen(env.PORT, env.HOST, () => {
     logger.info(

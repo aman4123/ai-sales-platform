@@ -1,14 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import toast from "react-hot-toast";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "../contexts/auth-context";
 import { generateEmailWithAI, researchWithAI, askDemoAI } from "../services/ai";
 import { api } from "../services/api";
 import { getLeadPage } from "../services/leadStorage";
 import { getReports } from "../services/reports";
-import { createResearchJob, getResearchStatus } from "../services/v2";
+import { createResearchJob, getDailySalesBrief, getResearchStatus, getSalesDepartmentStatus, pauseSalesDepartment, startSalesDepartment } from "../services/v2";
 import type { AuthUser } from "../types/api";
 import Dashboard from "./Dashboard";
 import Email from "./Email";
@@ -32,8 +32,12 @@ vi.mock("../services/leadStorage", () => ({ getLeadPage: vi.fn() }));
 vi.mock("../services/reports", () => ({ getReports: vi.fn() }));
 vi.mock("../services/v2", () => ({
   createResearchJob: vi.fn(),
+  getDailySalesBrief: vi.fn(),
   getResearchStatus: vi.fn(),
+  getSalesDepartmentStatus: vi.fn(),
+  pauseSalesDepartment: vi.fn(),
   saveResearchCompany: vi.fn(),
+  startSalesDepartment: vi.fn(),
 }));
 vi.mock("../services/api", () => ({
   api: { delete: vi.fn(), get: vi.fn(), put: vi.fn() },
@@ -80,6 +84,10 @@ const mockedResearch = vi.mocked(researchWithAI);
 const mockedEmail = vi.mocked(generateEmailWithAI);
 const mockedResearchStatus = vi.mocked(getResearchStatus);
 const mockedCreateResearchJob = vi.mocked(createResearchJob);
+const mockedGetDailySalesBrief = vi.mocked(getDailySalesBrief);
+const mockedGetSalesDepartmentStatus = vi.mocked(getSalesDepartmentStatus);
+const mockedPauseSalesDepartment = vi.mocked(pauseSalesDepartment);
+const mockedStartSalesDepartment = vi.mocked(startSalesDepartment);
 const mockedPut = vi.mocked(api.put);
 const mockedGet = vi.mocked(api.get);
 const mockedDelete = vi.mocked(api.delete);
@@ -88,8 +96,13 @@ function withRouter(component: React.ReactNode) {
   return render(<MemoryRouter>{component}</MemoryRouter>);
 }
 
+function LocationProbe() {
+  return <output aria-label="Current route">{useLocation().pathname}</output>;
+}
+
 describe("primary application pages", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     mockedUseAuth.mockReturnValue({
       user: authUser,
@@ -123,6 +136,50 @@ describe("primary application pages", () => {
       monthly: [{ month: "Jul", leads: 1 }],
       status: [{ name: "Interested", value: 1 }],
     });
+    mockedGetDailySalesBrief.mockResolvedValue({
+      id: "brief-1",
+      briefDate: new Date().toISOString(),
+      generatedAt: new Date().toISOString(),
+      dataLabel: "REAL",
+      metrics: {
+        leadsDiscovered: 1,
+        researchCompleted: 0,
+        qualifiedLeads: 0,
+        outreachSent: 0,
+        repliesReceived: 0,
+        interestedProspects: 0,
+        meetings: 0,
+      opportunitiesCreated: 0,
+      pipelineValue: 0,
+      deliveriesConfirmed: 0,
+      wonCustomers: 0,
+      revenue: 0,
+      revenueCurrency: "USD",
+      aiRequests: 0,
+      searchRequestsRecorded: 0,
+      estimatedAiCostMinor: 0,
+      externalProviderCostsAvailable: false,
+      },
+      failures: [],
+      risks: [],
+      approvals: [],
+      priorities: [],
+    });
+    mockedGetSalesDepartmentStatus.mockResolvedValue({
+      workspace: { id: "tenant-1", name: "Example Company Workspace", kind: "CUSTOMER", dataLabel: "REAL" },
+      range: { from: new Date().toISOString(), to: new Date().toISOString(), label: "Recorded activity" },
+      config: { mode: "MANUAL", status: "READY", outreachGoal: "Find customers", searchLocations: ["India"], approvedClaims: ["Approved claim"], prohibitedClaims: [], approvalPolicy: { newAudience: true, firstOutreach: true, sensitiveReplies: true, pricing: true, proposals: true, contracts: true }, dailyContactLimit: 10, monthlyContactLimit: 100, maximumFollowUps: 2, maximumRetries: 3, quietHours: { timezone: "UTC", start: "17:00", end: "09:00" }, budgetMinor: 0, currency: "USD", senderIdentity: { name: "Ava", role: "AI Sales Representative", email: "", disclosure: "AI representative working with the sales team." }, senderVerified: false, humanMeetingOwner: "Sales owner" },
+      canStart: true,
+      blockers: [],
+      providers: { research: { enabled: true, configured: true, provider: "TAVILY", requiredEnvironmentVariable: "TAVILY_API_KEY", message: "Configured" }, ai: { configured: false, selected: "MOCK", model: "test" }, email: { enabled: false, mode: "disabled" } },
+      metrics: { leadsDiscovered: 1, leadsVerified: 1, qualifiedProspects: 1, outreachAwaitingApproval: 0, outreachSent: 0, deliveriesConfirmed: 0, replies: 0, interestedProspects: 0, meetings: 0, opportunities: 0, wonCustomers: 0, revenue: 0, revenueCurrency: "USD", humanActions: 0, aiRequests: 0, searchRequests: 1, estimatedAiCostMinor: 0, externalProviderCostsAvailable: false },
+      currentBlocker: null,
+      recommendedNextAction: "Review qualified prospects.",
+      employees: [],
+      recentJobs: [],
+    });
+    mockedStartSalesDepartment.mockResolvedValue({ status: "RUNNING" });
+    mockedPauseSalesDepartment.mockResolvedValue({});
     mockedAskDemo.mockResolvedValue("Demo result");
     mockedResearch.mockResolvedValue("Research result");
     mockedEmail.mockResolvedValue("Generated email");
@@ -181,17 +238,93 @@ describe("primary application pages", () => {
 
   it("renders live dashboard totals and recent activity", async () => {
     withRouter(<Dashboard />);
-    expect(await screen.findByText("Acme")).toBeInTheDocument();
-    expect(screen.getByText("Total Leads").nextElementSibling).toHaveTextContent("1");
+    expect(await screen.findByText("Example Company Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Leads discovered").nextElementSibling).toHaveTextContent("1");
   });
 
   it("reports dashboard loading failures instead of presenting empty data as successful", async () => {
-    mockedGetLeadPage.mockRejectedValueOnce(new Error("database unavailable"));
+    mockedGetSalesDepartmentStatus.mockRejectedValueOnce(new Error("database unavailable"));
     withRouter(<Dashboard />);
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Could not load the dashboard.");
+      expect(toast.error).toHaveBeenCalledWith("Could not load the AI Sales Department.");
     });
+  });
+
+  it("starts, pauses, refreshes date ranges, and renders operational truth", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    mockedGetSalesDepartmentStatus.mockResolvedValue({
+      workspace: { id: "tenant-test", name: "Internal Test Workspace", kind: "TEST", dataLabel: "TEST" },
+      range: { from: new Date().toISOString(), to: new Date().toISOString(), label: "Test activity" },
+      config: { mode: "AUTONOMOUS", status: "RUNNING", outreachGoal: "Find qualified buyers", searchLocations: ["India"], approvedClaims: ["Approved"], prohibitedClaims: ["Guarantees"], approvalPolicy: { newAudience: true, firstOutreach: true, sensitiveReplies: true, pricing: true, proposals: true, contracts: true }, dailyContactLimit: 10, monthlyContactLimit: 100, maximumFollowUps: 2, maximumRetries: 3, quietHours: { timezone: "UTC", start: "17:00", end: "09:00" }, budgetMinor: 100, currency: "USD", senderIdentity: { name: "Ava", role: "AI SDR", email: "ava@example.com", disclosure: "AI representative" }, senderVerified: true, humanMeetingOwner: "Sam" },
+      canStart: true,
+      blockers: [],
+      providers: { research: { enabled: true, configured: false, provider: "TAVILY", requiredEnvironmentVariable: "TAVILY_API_KEY", message: "Not configured" }, ai: { configured: true, selected: "GROQ", model: "llama-test" }, email: { enabled: true, mode: "test" } },
+      metrics: { leadsDiscovered: 2, leadsVerified: 1, qualifiedProspects: 1, outreachAwaitingApproval: 1, outreachSent: 1, deliveriesConfirmed: 1, replies: 1, interestedProspects: 1, meetings: 1, opportunities: 1, wonCustomers: 1, revenue: 1000, revenueCurrency: "USD", humanActions: 1, aiRequests: 2, searchRequests: 3, estimatedAiCostMinor: 4, externalProviderCostsAvailable: true },
+      currentBlocker: null,
+      recommendedNextAction: "Review reply.",
+      employees: [{ key: "researcher", name: "Riya", role: "Researcher", job: "Find evidence", status: "BLOCKED", currentTask: "PROVIDER_CHECK", errorState: "Search unavailable", kpi: "Verified leads" }, { key: "manager", name: "Maya", role: "Manager", job: "Coordinate work", status: "IDLE", currentTask: null, errorState: null, kpi: "Revenue" }],
+      recentJobs: [{ id: "job-failed", category: "LEAD_DISCOVERY", status: "FAILED", errorCode: "PROVIDER_DISABLED", createdAt: new Date().toISOString(), completedAt: new Date().toISOString() }, { id: "job-complete", category: "DAILY_BRIEF", status: "COMPLETED", errorCode: null, createdAt: new Date().toISOString(), completedAt: new Date().toISOString() }],
+    });
+    mockedGetDailySalesBrief.mockResolvedValue({
+      id: "brief-rich",
+      briefDate: new Date().toISOString(),
+      generatedAt: new Date().toISOString(),
+      dataLabel: "TEST",
+      metrics: { leadsDiscovered: 2, researchCompleted: 1, qualifiedLeads: 1, outreachSent: 1, repliesReceived: 1, interestedProspects: 1, meetings: 1, opportunitiesCreated: 1, pipelineValue: 1000, deliveriesConfirmed: 1, wonCustomers: 1, revenue: 1000, revenueCurrency: "USD", aiRequests: 2, searchRequestsRecorded: 3, estimatedAiCostMinor: 4, externalProviderCostsAvailable: true },
+      failures: ["One provider failure"], risks: ["Human review needed"], approvals: ["Approve audience"], priorities: ["Review reply"],
+    });
+    withRouter(<Dashboard />);
+    expect(await screen.findByText("Internal Test Workspace")).toBeInTheDocument();
+    expect(screen.getByText(/Search unavailable/)).toBeInTheDocument();
+    expect(screen.getByText("Provider costs recorded")).toBeInTheDocument();
+    expect(screen.getByText("lead discovery")).toBeInTheDocument();
+    expect(screen.getByText("One provider failure")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Date range"), "7");
+    await waitFor(() => expect(mockedGetSalesDepartmentStatus).toHaveBeenCalledWith(expect.any(AbortSignal), expect.objectContaining({ from: expect.any(String), to: expect.any(String) })));
+    await user.click(screen.getByRole("button", { name: /Start AI Sales/ }));
+    await waitFor(() => expect(mockedStartSalesDepartment).toHaveBeenCalledOnce());
+    await user.click(screen.getByRole("button", { name: "Pause AI Sales" }));
+    expect(mockedPauseSalesDepartment).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Pause AI Sales" }));
+    await waitFor(() => expect(mockedPauseSalesDepartment).toHaveBeenCalledWith("Paused by a human operator from the command center."));
+  });
+
+  it("routes every recorded configuration blocker to its safe setup surface", async () => {
+    const user = userEvent.setup();
+    mockedGetSalesDepartmentStatus.mockResolvedValueOnce({
+      ...(await mockedGetSalesDepartmentStatus()),
+      canStart: false,
+      config: { ...(await mockedGetSalesDepartmentStatus()).config, status: "BLOCKED" },
+      currentBlocker: { code: "SALES_STRATEGY_REQUIRED", message: "Confirm a sales strategy.", blocking: true },
+      blockers: [
+        { code: "SALES_STRATEGY_REQUIRED", message: "Confirm a sales strategy.", blocking: true },
+        { code: "RESEARCH_PROVIDER_REQUIRED", message: "Configure research.", blocking: true },
+        { code: "OUTBOUND_PROVIDER_REQUIRED", message: "Configure outbound.", blocking: false },
+        { code: "COMPANY_PROFILE_REQUIRED", message: "Approve company knowledge.", blocking: true },
+      ],
+    });
+    render(<MemoryRouter><Dashboard /><LocationProbe /></MemoryRouter>);
+    expect((await screen.findAllByText("Confirm a sales strategy.")).length).toBeGreaterThan(1);
+    await user.click(screen.getByRole("button", { name: /Start AI Sales/ }));
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/command");
+    await user.click(screen.getByRole("button", { name: "Configure research." }));
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/settings");
+    await user.click(screen.getByRole("button", { name: "Configure outbound." }));
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/settings");
+    await user.click(screen.getByRole("button", { name: "Approve company knowledge." }));
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/company-setup");
+  });
+
+  it("reports failed start and pause transitions", async () => {
+    const user = userEvent.setup();
+    mockedStartSalesDepartment.mockRejectedValueOnce(new Error("start unavailable"));
+    withRouter(<Dashboard />);
+    await screen.findByText("Example Company Workspace");
+    await user.click(screen.getByRole("button", { name: /Start AI Sales/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("AI Sales could not start."));
   });
 
   it("renders honest landing calls to action and evidence safeguards", () => {

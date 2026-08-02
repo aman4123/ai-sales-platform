@@ -7,12 +7,13 @@ import type { EmailService } from "../../lib/email.js";
 import { AppError, UnauthorizedError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
-import { requireAuth } from "../../middleware/auth.js";
+import { requireActiveSession, requireAuth } from "../../middleware/auth.js";
 import type { RequestRateLimiters } from "../../middleware/request-security.js";
 import {
   availableAccessModes,
   defaultAccessMode,
   hashToken,
+  isMasterAccount,
   signAccessToken,
   signRefreshToken,
   tokenHashesMatch,
@@ -37,6 +38,11 @@ import {
   sessionMetadata,
   type UserWithSettings,
 } from "./auth.security.js";
+import {
+  ensurePersonalTenant,
+  ensureTenantForAccessMode,
+  tenantContextById,
+} from "../tenancy/tenant.service.js";
 
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
 const registerSchema = z.object({
@@ -146,6 +152,7 @@ export function createAuthRouter(
       }
       throw error;
     }
+    await ensurePersonalTenant(database, user);
 
     const issued = await replaceAccountToken(
       database,
@@ -258,7 +265,7 @@ export function createAuthRouter(
     response.cookie(REFRESH_COOKIE, tokens.refreshToken, cookieOptions);
     response.json({
       data: {
-        user: serializeUser(user, tokens.accessMode),
+        user: serializeUser(user, tokens.accessMode, tokens.tenant),
         accessToken: tokens.accessToken,
         recoveryCodes,
       },
@@ -276,21 +283,33 @@ export function createAuthRouter(
     if (!user || !passwordMatches) {
       throw new UnauthorizedError("The email address or password is incorrect.");
     }
+    if (user.status !== "ACTIVE") {
+      throw new AppError(403, "ACCOUNT_UNAVAILABLE", "This account is not active.");
+    }
     if (user.emailVerifiedAt === null) {
       throw new AppError(403, "EMAIL_NOT_VERIFIED", "Verify your email address before signing in.");
     }
 
-    const tokens = await createSession(database, authUser(user), sessionMetadata(request));
+    const loginAt = new Date();
+    const activeUser = await database.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: loginAt, lastActiveAt: loginAt },
+      include: { settings: true },
+    });
+    const tokens = await createSession(database, authUser(activeUser), sessionMetadata(request));
     response.cookie(REFRESH_COOKIE, tokens.refreshToken, cookieOptions);
     response.json({
-      data: { user: serializeUser(user, tokens.accessMode), accessToken: tokens.accessToken },
+      data: {
+        user: serializeUser(activeUser, tokens.accessMode, tokens.tenant),
+        accessToken: tokens.accessToken,
+      },
     });
   });
 
   router.post("/mode", requireAuth, async (request, response) => {
     const { mode } = accessModeSchema.parse(request.body);
     const authenticated = request.user!;
-    if (authenticated.accountRole !== "SUPER_ADMIN") {
+    if (!isMasterAccount(authenticated.accountRole)) {
       throw new AppError(403, "MASTER_ADMIN_REQUIRED", "Master Admin access is required.");
     }
     if (!availableAccessModes(authenticated.accountRole).includes(mode)) {
@@ -304,6 +323,17 @@ export function createAuthRouter(
       throw new UnauthorizedError("Sign in again before changing the access mode.");
     }
 
+    const user = await database.user.findUnique({
+      where: { id: authenticated.id },
+      include: { settings: true },
+    });
+    if (!user || user.emailVerifiedAt === null || !isMasterAccount(user.role)) {
+      throw new UnauthorizedError("The Master Admin account is no longer available.");
+    }
+    const tenant = await ensureTenantForAccessMode(database, user, mode);
+    if (!tenant) {
+      throw new AppError(503, "WORKSPACE_UNAVAILABLE", "The requested workspace is unavailable.");
+    }
     const updated = await database.refreshSession.updateMany({
       where: {
         id: authenticated.sessionId,
@@ -311,32 +341,35 @@ export function createAuthRouter(
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
-      data: { accessMode: mode },
+      data: { accessMode: mode, tenantId: tenant.id },
     });
     if (updated.count !== 1) {
       throw new UnauthorizedError("The active session is no longer available.");
     }
-    const user = await database.user.findUnique({
-      where: { id: authenticated.id },
-      include: { settings: true },
-    });
-    if (!user || user.emailVerifiedAt === null || user.role !== "SUPER_ADMIN") {
-      throw new UnauthorizedError("The Master Admin account is no longer available.");
-    }
     await database.auditLog.create({
       data: {
         actorUserId: user.id,
+        tenantId: tenant.id,
         action: "ACCESS_MODE_CHANGED",
         resourceType: "RefreshSession",
         resourceId: authenticated.sessionId,
         requestId: request.id,
-        metadata: { mode },
+        metadata: {
+          fromMode: authenticated.accessMode,
+          toMode: mode,
+          workspaceKind: tenant.kind,
+        },
       },
     });
     response.json({
       data: {
-        user: serializeUser(user, mode),
-        accessToken: signAccessToken(authUser(user), authenticated.sessionId, mode),
+        user: serializeUser(user, mode, tenant),
+        accessToken: signAccessToken(
+          authUser(user),
+          authenticated.sessionId,
+          mode,
+          tenant.id,
+        ),
       },
     });
   });
@@ -470,7 +503,11 @@ export function createAuthRouter(
     response.status(204).send();
   });
 
-  router.post("/recovery-codes", requireAuth, async (request, response) => {
+  router.post(
+    "/recovery-codes",
+    requireAuth,
+    requireActiveSession(database),
+    async (request, response) => {
     const input = regenerateCodesSchema.parse(request.body);
     const user = await database.user.findUnique({ where: { id: request.user!.id } });
     const passwordMatches = await compare(input.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
@@ -482,7 +519,8 @@ export function createAuthRouter(
       await transaction.recoveryCode.createMany({ data: recoveryCodeRows(user.id, recoveryCodes) });
     });
     response.json({ data: { recoveryCodes } });
-  });
+    },
+  );
 
   router.post("/refresh", async (request, response) => {
     const currentToken = refreshTokenFromRequest(request);
@@ -500,6 +538,7 @@ export function createAuthRouter(
       !tokenHashesMatch(session.tokenHash, currentHash) ||
       session.expiresAt <= new Date() ||
       session.user.emailVerifiedAt === null
+      || session.user.status !== "ACTIVE"
     ) {
       throw new UnauthorizedError("The refresh session is invalid or expired.");
     }
@@ -525,6 +564,8 @@ export function createAuthRouter(
     const nextAccessMode = availableAccessModes(user.role).includes(storedAccessMode ?? "USER")
       ? storedAccessMode!
       : defaultAccessMode(user.role);
+    const tenant = await ensureTenantForAccessMode(database, user, nextAccessMode);
+    const tenantId = tenant?.id ?? session.tenantId;
     const now = new Date();
     const rotated = await database.$transaction(async (transaction) => {
       const revoked = await transaction.refreshSession.updateMany({
@@ -536,6 +577,7 @@ export function createAuthRouter(
         data: {
           id: nextSessionId,
           userId: session.userId,
+          ...(tenantId ? { tenantId } : {}),
           accessMode: nextAccessMode,
           tokenHash: hashToken(nextRefreshToken),
           expiresAt: new Date(Date.now() + env.JWT_REFRESH_TTL_SECONDS * 1_000),
@@ -562,8 +604,13 @@ export function createAuthRouter(
     response.cookie(REFRESH_COOKIE, nextRefreshToken, cookieOptions);
     response.json({
       data: {
-        user: serializeUser(user, nextAccessMode),
-        accessToken: signAccessToken(authUser(user), nextSessionId, nextAccessMode),
+        user: serializeUser(user, nextAccessMode, tenant),
+        accessToken: signAccessToken(
+          authUser(user),
+          nextSessionId,
+          nextAccessMode,
+          tenantId ?? undefined,
+        ),
       },
     });
   });
@@ -590,15 +637,20 @@ export function createAuthRouter(
     response.status(204).send();
   });
 
-  router.get("/me", requireAuth, async (request, response) => {
+  router.get("/me", requireAuth, requireActiveSession(database), async (request, response) => {
     const user = await database.user.findUnique({
       where: { id: request.user!.id },
       include: { settings: true },
     });
-    if (!user || user.emailVerifiedAt === null) {
+    if (!user || user.emailVerifiedAt === null || user.status !== "ACTIVE") {
       throw new UnauthorizedError("The authenticated account no longer exists.");
     }
-    response.json({ data: { user: serializeUser(user, request.user!.accessMode) } });
+    const tenant = request.user!.tenantId
+      ? await tenantContextById(database, user.id, request.user!.tenantId)
+      : await ensureTenantForAccessMode(database, user, request.user!.accessMode);
+    response.json({
+      data: { user: serializeUser(user, request.user!.accessMode, tenant) },
+    });
   });
 
   return router;

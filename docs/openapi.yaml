@@ -20,6 +20,7 @@ tags:
   - { name: Research, description: Evidence-grounded provider research }
   - { name: Campaigns, description: Approval-gated outreach campaigns }
   - { name: Operations, description: "Tasks, replies, and observed analytics" }
+  - { name: Sales Department, description: Bounded tenant automation and workforce status }
   - { name: Webhooks, description: Signed provider delivery events }
   - { name: Admin, description: Role-protected system operations }
 paths:
@@ -412,6 +413,98 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "503": { $ref: "#/components/responses/ServiceUnavailable" }
+  /unsubscribe:
+    get:
+      operationId: showUnsubscribeConfirmation
+      tags: [Campaigns]
+      security: []
+      summary: Show confirmation for a signed tenant-scoped unsubscribe capability
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string, minLength: 20, maxLength: 1000 }
+      responses:
+        "200": { description: Confirmation page }
+        "400": { description: Invalid signed capability }
+    post:
+      operationId: oneClickUnsubscribe
+      tags: [Campaigns]
+      security: []
+      summary: Suppress a recipient and cancel pending messages using a signed one-click capability
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string, minLength: 20, maxLength: 1000 }
+      responses:
+        "204": { description: Idempotent non-enumerating unsubscribe response }
+        "429": { description: Rate limit reached }
+  /sales-department/status:
+    get:
+      operationId: getSalesDepartmentStatus
+      tags: [Sales Department]
+      summary: Return tenant-labeled workforce state, observed metrics, blockers, providers, and jobs
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: Current tenant sales department status }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /sales-department/config:
+    put:
+      operationId: configureSalesDepartment
+      tags: [Sales Department]
+      summary: Save bounded autonomy, approval, sender, quiet-hour, budget, and volume controls
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200": { description: Department controls saved and audited }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /sales-department/start:
+    post:
+      operationId: startSalesDepartment
+      tags: [Sales Department]
+      summary: Queue the initial idempotent bounded jobs after preflight checks
+      responses:
+        "202": { description: Jobs accepted }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /sales-department/pause:
+    post:
+      operationId: pauseSalesDepartment
+      tags: [Sales Department]
+      summary: Pause the department and cancel pending tenant jobs
+      responses:
+        "200": { description: Department paused }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /sales-department/emergency-stop:
+    post:
+      operationId: emergencyStopSalesDepartment
+      tags: [Sales Department]
+      summary: Stop jobs, pending messages, and non-terminal campaigns for the tenant
+      responses:
+        "200": { description: Emergency stop completed and audited }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/jobs:
+    get:
+      operationId: listAutomationJobs
+      tags: [Admin]
+      summary: List sanitized bounded-job state across workspaces
+      responses:
+        "200": { description: Job state returned without raw payloads }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /admin/system:
+    get:
+      operationId: getAdminSystemStatus
+      tags: [Admin]
+      summary: Return sanitized dependency, provider, worker, queue, and revision status
+      responses:
+        "200": { description: Sanitized system status }
+        "403": { $ref: "#/components/responses/Forbidden" }
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AppError, NotFoundError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import type { RedisClient } from "../../lib/redis.js";
-import { consumeMonthlyAiRequest, resolveAiProvider } from "../ai/ai.routes.js";
+import { consumeTenantAiRequest, resolveAiProvider } from "../ai/ai.routes.js";
 import { askGroq } from "../ai/ai.service.js";
 import {
   evidenceConfidence,
@@ -17,6 +17,7 @@ import {
 } from "./research.grounding.js";
 import { searchProviderConfiguration } from "./search.providers.js";
 import { executeVerifiedSearch } from "./search.service.js";
+import { tenantScope, tenantWrite } from "../tenancy/tenant.service.js";
 
 const createJobSchema = z.object({
   query: z.string().trim().min(3).max(500),
@@ -69,7 +70,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
   router.get("/jobs", async (request, response) => {
     const query = listJobsSchema.parse(request.query);
     const jobs = await database.researchJob.findMany({
-      where: { userId: request.user!.id },
+      where: tenantScope(request.tenant, request.user!.id),
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: query.limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
@@ -88,7 +89,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
   router.get("/jobs/:id", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const job = await database.researchJob.findFirst({
-      where: { id, userId: request.user!.id },
+      where: { id, ...tenantScope(request.tenant, request.user!.id) },
       include: {
         results: {
           orderBy: { confidenceScore: "desc" },
@@ -101,6 +102,10 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
   });
 
   router.post("/jobs", async (request, response) => {
+    if (!request.tenant) {
+      throw new AppError(409, "TENANT_CONTEXT_REQUIRED", "A company workspace is required for research.");
+    }
+    const tenantId = request.tenant.id;
     const input = createJobSchema.parse(request.body);
     if (!input.confirmPaidSearch) {
       throw new AppError(
@@ -117,6 +122,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
     const job = await database.researchJob.create({
       data: {
         userId: request.user!.id,
+        tenantId,
         query: input.query,
         targetType: input.targetType,
         provider: configuration.provider,
@@ -131,6 +137,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
         redis,
         request.user!.id,
         input.query,
+        tenantId,
       );
       const groundedCandidates = evidenceFromSearch(search);
       const allEvidence = groundedCandidates.candidates.flatMap((candidate) => candidate.evidence);
@@ -141,7 +148,11 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
       const aiProvider = resolveAiProvider(settings?.aiProvider ?? "MOCK");
       let groundedAiOutput = null;
       if (aiProvider === "GROQ" && allEvidence.length > 0) {
-        await consumeMonthlyAiRequest(redis);
+        await consumeTenantAiRequest(database, redis, {
+          userId: request.user!.id,
+          tenantId,
+          accountRole: request.user!.accountRole,
+        });
         const rawOutput = await askGroq(
           groundedResearchSystemPrompt,
           groundedResearchUserPrompt(allEvidence),
@@ -167,6 +178,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
         const result = await database.companyResearchResult.create({
           data: {
             userId: request.user!.id,
+            tenantId,
             jobId: job.id,
             companyName: evidenceValue(candidate.evidence, "companyName"),
             website: evidenceValue(candidate.evidence, "website"),
@@ -184,6 +196,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
             evidence: {
               create: candidate.evidence.map((item) => ({
                 id: item.id,
+                tenantId,
                 field: item.field,
                 value: item.value,
                 sourceUrl: item.sourceUrl,
@@ -203,7 +216,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
       }
 
       const completedJob = await database.researchJob.update({
-        where: { id: job.id, userId: request.user!.id },
+        where: { id: job.id, ...tenantScope(request.tenant, request.user!.id) },
         data: { status: "COMPLETED", completedAt: new Date() },
       });
       response.status(201).json({
@@ -214,7 +227,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
       });
     } catch (error) {
       await database.researchJob.update({
-        where: { id: job.id, userId: request.user!.id },
+        where: { id: job.id, ...tenantScope(request.tenant, request.user!.id) },
         data: {
           status: "FAILED",
           completedAt: new Date(),
@@ -229,7 +242,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
   router.post("/results/:id/save", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const result = await database.companyResearchResult.findFirst({
-      where: { id, userId: request.user!.id },
+      where: { id, ...tenantScope(request.tenant, request.user!.id) },
     });
     if (!result) throw new NotFoundError("Research result");
     if (!result.companyName) {
@@ -238,7 +251,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
 
     const existing = result.domain
       ? await database.company.findUnique({
-          where: { userId_domain: { userId: request.user!.id, domain: result.domain } },
+          where: { tenantId_domain: { tenantId: request.tenant!.id, domain: result.domain } },
         })
       : null;
     const company =
@@ -246,6 +259,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
       (await database.company.create({
         data: {
           userId: request.user!.id,
+          ...tenantWrite(request.tenant),
           name: result.companyName,
           legalName: result.legalName,
           aliases: result.aliases,
@@ -270,7 +284,7 @@ export function createResearchRouter(database: DatabaseClient, redis: RedisClien
 
     if (result.companyId !== company.id) {
       await database.companyResearchResult.update({
-        where: { id, userId: request.user!.id },
+        where: { id, ...tenantScope(request.tenant, request.user!.id) },
         data: { companyId: company.id },
       });
     }

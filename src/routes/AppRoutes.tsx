@@ -13,6 +13,7 @@ const ResendVerification = lazy(() => import("../pages/ResendVerification"));
 const ResetPassword = lazy(() => import("../pages/ResetPassword"));
 const RecoverAccount = lazy(() => import("../pages/RecoverAccount"));
 const Dashboard = lazy(() => import("../pages/Dashboard"));
+const CompanySetup = lazy(() => import("../pages/CompanySetup"));
 const CommandCenter = lazy(() => import("../pages/CommandCenter"));
 const Research = lazy(() => import("../pages/Research"));
 const Leads = lazy(() => import("../pages/Leads"));
@@ -47,6 +48,7 @@ export default function AppRoutes() {
           <Route path="/contact" element={<Legal />} />
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/company-setup" element={<CompanySetup />} />
             <Route path="/command" element={<CommandCenter />} />
             <Route path="/research" element={<Research />} />
             <Route path="/leads" element={<Leads />} />

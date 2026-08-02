@@ -86,7 +86,7 @@ All supported variables are documented in `.env.example`. Important production v
 - `GROQ_API_KEY`, `GROQ_MODEL`, and a positive `AI_MONTHLY_REQUEST_LIMIT`: optional server-only Groq configuration; without a key, requests safely use Mock AI
 - `SEARCH_ENABLED`, `SEARCH_PROVIDER`, the selected provider key, and a positive `SEARCH_MONTHLY_REQUEST_LIMIT`: required together for live verified research
 - `OUTBOUND_EMAIL_ENABLED`, `OUTBOUND_DAILY_LIMIT`, and `EMAIL_WEBHOOK_SECRET`: control approved campaign delivery and signed provider events; outbound defaults off
-- `INITIAL_ADMIN_EMAIL`: an existing verified user to promote with `npm run admin:assign-initial`; no address is hard-coded
+- `MASTER_ADMIN_EMAIL`: the verified owner identity bootstrapped by the audited startup/CLI path; no address or password is hard-coded (`INITIAL_ADMIN_EMAIL` remains a transitional alias)
 - `SERVE_STATIC`: set to `true` when Express should serve the built frontend
 
 Never commit `.env` files. The repository ignores every `.env*` file except `.env.example`.
@@ -111,7 +111,7 @@ Never commit `.env` files. The repository ignores every `.env*` file except `.en
 | `npm run db:deploy` | Apply committed migrations in CI/production |
 | `npm run db:backup` | Create and verify a custom-format PostgreSQL backup |
 | `npm run db:restore` | Restore a backup after exact-target confirmation |
-| `npm run admin:assign-initial` | After `npm run build`, promote the verified `INITIAL_ADMIN_EMAIL` user and write an audit event without exposing the address |
+| `npm run admin:assign-initial` | After `npm run build`, bootstrap or promote the configured `MASTER_ADMIN_EMAIL` and write an audit event without exposing the address or password |
 | `npm start` | Start the compiled production server |
 
 ## API surface

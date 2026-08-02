@@ -89,13 +89,13 @@ describe("search provider adapters", () => {
     const cached = { provider: "TAVILY", query: "cached", results: [], retrievedAt: new Date().toISOString() };
     const cachedRedis = { sendCommand: vi.fn().mockResolvedValueOnce(JSON.stringify(cached)) } as unknown as RedisClient;
     const database = { searchUsage: { upsert: vi.fn() } } as unknown as DatabaseClient;
-    await expect(executeVerifiedSearch(database, cachedRedis, "user-1", "cached")).resolves.toMatchObject({ cached: true });
+    await expect(executeVerifiedSearch(database, cachedRedis, "user-1", "cached", "tenant-1")).resolves.toMatchObject({ cached: true });
     expect(database.searchUsage.upsert).not.toHaveBeenCalled();
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ results: [] })));
     const redis = { sendCommand: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce("OK") } as unknown as RedisClient;
     vi.mocked(database.searchUsage.upsert).mockResolvedValue({} as never);
-    await expect(executeVerifiedSearch(database, redis, "user-1", "fresh")).resolves.toMatchObject({ cached: false });
+    await expect(executeVerifiedSearch(database, redis, "user-1", "fresh", "tenant-1")).resolves.toMatchObject({ cached: false });
     expect(database.searchUsage.upsert).toHaveBeenCalled();
     expect(redis.sendCommand).toHaveBeenLastCalledWith(["SET", expect.any(String), expect.any(String), "EX", expect.any(String)]);
   });

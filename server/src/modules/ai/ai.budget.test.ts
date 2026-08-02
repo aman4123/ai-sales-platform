@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RedisClient } from "../../lib/redis.js";
-import { consumeMonthlyAiRequest, resolveAiProvider } from "./ai.routes.js";
+import type { DatabaseClient } from "../../lib/prisma.js";
+import { consumeMonthlyAiRequest, consumeTenantAiRequest, resolveAiProvider } from "./ai.routes.js";
 
 function redisWithReplies(...replies: Array<number | string>) {
   const sendCommand = vi.fn();
@@ -41,6 +42,36 @@ describe("monthly paid-AI budget guard", () => {
       statusCode: 503,
       code: "AI_BUDGET_NOT_CONFIGURED",
     });
+  });
+
+  it("enforces both the global provider ceiling and the company allowance", async () => {
+    const redis = redisWithReplies(1, 1, 1, 1);
+    const database = {
+      aiBudget: { findUnique: vi.fn().mockResolvedValue({ mode: "LIMITED", monthlyRequestLimit: 10 }) },
+    } as unknown as DatabaseClient;
+
+    await expect(consumeTenantAiRequest(database, redis, {
+      userId: "user-1",
+      tenantId: "tenant-1",
+      accountRole: "MEMBER",
+    }, new Date("2026-07-24T00:00:00.000Z"))).resolves.toMatchObject({ mode: "LIMITED", used: 1 });
+
+    expect(redis.sendCommand).toHaveBeenCalledWith(["INCR", "budget:ai:groq:2026-07"]);
+    expect(redis.sendCommand).toHaveBeenCalledWith(["INCR", "budget:ai:groq:tenant-1:2026-07"]);
+  });
+
+  it("keeps internal unlimited tenant accounting behind the global spend ceiling", async () => {
+    const redis = redisWithReplies(1, 1);
+    const database = {
+      aiBudget: { findUnique: vi.fn().mockResolvedValue({ mode: "INTERNAL_UNLIMITED" }) },
+    } as unknown as DatabaseClient;
+
+    await expect(consumeTenantAiRequest(database, redis, {
+      userId: "master-1",
+      tenantId: "internal-tenant",
+      accountRole: "MASTER_ADMIN",
+    }, new Date("2026-07-24T00:00:00.000Z"))).resolves.toMatchObject({ mode: "INTERNAL_UNLIMITED" });
+    expect(redis.sendCommand).toHaveBeenCalledWith(["INCR", "budget:ai:groq:2026-07"]);
   });
 });
 

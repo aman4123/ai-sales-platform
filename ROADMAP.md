@@ -1,30 +1,25 @@
-# AI Sales Platform Roadmap
+# Roadmap
 
-The capabilities below are planned for future releases. They are intentionally not included in V2 RC1.
+Roadmap items are not active product claims. Incomplete work stays behind disabled flags or outside the production interface.
 
-## V3
+## Prove internally
 
-- Long-term AI memory
-- Learning from successful campaigns
-- Organization knowledge graph
-- Semantic search over previous conversations
-- AI strategy engine
+- Configure the Internal Company Workspace with approved first-party product knowledge and legal policy.
+- Verify a first-party sender domain, SPF, DKIM, DMARC, reply-to, signed provider webhooks, footer, and controlled warm-up.
+- Run the self-selling loop against real public evidence and record actual cost, delivery, reply, meeting, opportunity, customer, and revenue results.
+- Add provider-native health history and delivery/reputation measurements where APIs support them.
 
-## V4
+## Complete the operating loop
 
-- Multi-user organizations
-- Team permissions
-- Shared inbox
-- Pipeline forecasting
-- Calendar integration
-- Meeting intelligence
+- Durable strategy, message-generation, approval-readiness, sending, follow-up, inbound, reply-classification, task, and meeting-preparation workers. Categories already modeled but not implemented must remain visibly inactive.
+- Calendar availability and meeting briefs after explicit OAuth authorization.
+- Knowledge-base versioning, conflict review, retention workflows, customer exports, and audit export.
+- Jurisdiction-specific policy packs reviewed by qualified counsel; no universal-compliance claim.
+- Actual provider-cost ingestion and clearly separated human-time estimates.
 
-## Enterprise
+## Scale and enterprise
 
-- SSO
-- SOC 2 readiness
-- Audit export
-- API keys
-- White labeling
-- Billing
-- Multi-region
+- Payment-provider-backed billing without synthetic success states.
+- SSO, SCIM, organization policy, key rotation, customer-managed retention, and regional deployment options.
+- Independent penetration testing, disaster-recovery exercises, accessibility audits, and SOC 2 readiness evidence.
+- Additional approved search, mail, CRM, and calendar adapters under the same evidence and tenant-isolation contracts.

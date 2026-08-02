@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { AppError, NotFoundError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
+import { tenantScope, tenantWrite } from "../tenancy/tenant.service.js";
 
 const optionalUrl = z.union([z.string().trim().url().max(2_000), z.literal("")]).optional();
 const optionalEmail = z.union([z.string().trim().toLowerCase().email().max(254), z.literal("")]).optional();
@@ -84,7 +85,7 @@ function domainFromWebsite(website: string | undefined) {
 
 async function assertOwnedRelations(
   database: DatabaseClient,
-  userId: string,
+  scope: { tenantId: string } | { userId: string },
   input: {
     companyId?: string | undefined;
     contactId?: string | undefined;
@@ -94,16 +95,16 @@ async function assertOwnedRelations(
 ) {
   const checks = await Promise.all([
     input.companyId
-      ? database.company.findFirst({ where: { id: input.companyId, userId, deletedAt: null }, select: { id: true } })
+      ? database.company.findFirst({ where: { id: input.companyId, ...scope, deletedAt: null }, select: { id: true } })
       : true,
     input.contactId
-      ? database.contact.findFirst({ where: { id: input.contactId, userId, deletedAt: null }, select: { id: true } })
+      ? database.contact.findFirst({ where: { id: input.contactId, ...scope, deletedAt: null }, select: { id: true } })
       : true,
     input.dealId
-      ? database.deal.findFirst({ where: { id: input.dealId, userId, deletedAt: null }, select: { id: true } })
+      ? database.deal.findFirst({ where: { id: input.dealId, ...scope, deletedAt: null }, select: { id: true } })
       : true,
     input.leadId
-      ? database.lead.findFirst({ where: { id: input.leadId, userId }, select: { id: true } })
+      ? database.lead.findFirst({ where: { id: input.leadId, ...scope }, select: { id: true } })
       : true,
   ]);
   if (checks.some((result) => !result)) throw new NotFoundError("CRM resource");
@@ -116,7 +117,7 @@ export function createCrmRouter(database: DatabaseClient) {
     const query = listSchema.parse(request.query);
     const companies = await database.company.findMany({
       where: {
-        userId: request.user!.id,
+        ...tenantScope(request.tenant, request.user!.id),
         deletedAt: null,
         ...(query.search
           ? {
@@ -147,7 +148,7 @@ export function createCrmRouter(database: DatabaseClient) {
     const domain = domainFromWebsite(input.website);
     if (domain) {
       const duplicate = await database.company.findUnique({
-        where: { userId_domain: { userId: request.user!.id, domain } },
+        where: { tenantId_domain: { tenantId: request.tenant!.id, domain } },
       });
       if (duplicate) {
         throw new AppError(409, "COMPANY_DUPLICATE", "A company with this domain already exists.");
@@ -156,6 +157,7 @@ export function createCrmRouter(database: DatabaseClient) {
     const company = await database.company.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         name: input.name,
         legalName: emptyToNull(input.legalName),
         website: emptyToNull(input.website),
@@ -173,7 +175,7 @@ export function createCrmRouter(database: DatabaseClient) {
     const query = listSchema.parse(request.query);
     const contacts = await database.contact.findMany({
       where: {
-        userId: request.user!.id,
+        ...tenantScope(request.tenant, request.user!.id),
         deletedAt: null,
         ...(query.search
           ? {
@@ -197,17 +199,18 @@ export function createCrmRouter(database: DatabaseClient) {
 
   router.post("/contacts", async (request, response) => {
     const input = contactSchema.parse(request.body);
-    await assertOwnedRelations(database, request.user!.id, input);
+    await assertOwnedRelations(database, tenantScope(request.tenant, request.user!.id), input);
     const email = emptyToNull(input.publicEmail);
     if (email) {
       const duplicate = await database.contact.findUnique({
-        where: { userId_publicEmail: { userId: request.user!.id, publicEmail: email } },
+        where: { tenantId_publicEmail: { tenantId: request.tenant!.id, publicEmail: email } },
       });
       if (duplicate) throw new AppError(409, "CONTACT_DUPLICATE", "A contact with this email already exists.");
     }
     const contact = await database.contact.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         companyId: input.companyId ?? null,
         name: input.name,
         jobTitle: emptyToNull(input.jobTitle),
@@ -225,7 +228,7 @@ export function createCrmRouter(database: DatabaseClient) {
     const query = listSchema.parse(request.query);
     const deals = await database.deal.findMany({
       where: {
-        userId: request.user!.id,
+        ...tenantScope(request.tenant, request.user!.id),
         deletedAt: null,
         ...(query.search ? { name: { contains: query.search, mode: "insensitive" } } : {}),
       },
@@ -246,10 +249,11 @@ export function createCrmRouter(database: DatabaseClient) {
 
   router.post("/deals", async (request, response) => {
     const input = dealSchema.parse(request.body);
-    await assertOwnedRelations(database, request.user!.id, input);
+    await assertOwnedRelations(database, tenantScope(request.tenant, request.user!.id), input);
     const deal = await database.deal.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         name: input.name,
         stage: input.stage,
         value: input.value,
@@ -266,7 +270,7 @@ export function createCrmRouter(database: DatabaseClient) {
     const query = listSchema.parse(request.query);
     const activities = await database.crmActivity.findMany({
       where: {
-        userId: request.user!.id,
+        ...tenantScope(request.tenant, request.user!.id),
         ...(query.search ? { summary: { contains: query.search, mode: "insensitive" } } : {}),
       },
       orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
@@ -280,10 +284,11 @@ export function createCrmRouter(database: DatabaseClient) {
 
   router.post("/activities", async (request, response) => {
     const input = activitySchema.parse(request.body);
-    await assertOwnedRelations(database, request.user!.id, input);
+    await assertOwnedRelations(database, tenantScope(request.tenant, request.user!.id), input);
     const activity = await database.crmActivity.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         type: input.type,
         summary: input.summary,
         companyId: input.companyId ?? null,
@@ -297,10 +302,11 @@ export function createCrmRouter(database: DatabaseClient) {
 
   router.post("/notes", async (request, response) => {
     const input = noteSchema.parse(request.body);
-    await assertOwnedRelations(database, request.user!.id, input);
+    await assertOwnedRelations(database, tenantScope(request.tenant, request.user!.id), input);
     const note = await database.note.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         body: input.body,
         leadId: input.leadId ?? null,
         companyId: input.companyId ?? null,
@@ -317,11 +323,11 @@ export function createCrmRouter(database: DatabaseClient) {
     const emails = input.contacts.map((contact) => emptyToNull(contact.publicEmail)).filter(Boolean) as string[];
     const [existingCompanies, existingContacts] = await Promise.all([
       database.company.findMany({
-        where: { userId: request.user!.id, domain: { in: domains } },
+        where: { ...tenantScope(request.tenant, request.user!.id), domain: { in: domains } },
         select: { domain: true },
       }),
       database.contact.findMany({
-        where: { userId: request.user!.id, publicEmail: { in: emails } },
+        where: { ...tenantScope(request.tenant, request.user!.id), publicEmail: { in: emails } },
         select: { publicEmail: true },
       }),
     ]);

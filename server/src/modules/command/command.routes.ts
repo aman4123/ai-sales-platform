@@ -3,6 +3,7 @@ import { z } from "zod";
 import { NotFoundError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import { searchProviderConfiguration } from "../research/search.providers.js";
+import { tenantScope, tenantWrite } from "../tenancy/tenant.service.js";
 
 const goalSchema = z.object({
   goal: z.string().trim().min(5).max(1_000),
@@ -23,7 +24,7 @@ export function createCommandRouter(database: DatabaseClient) {
 
   router.get("/goals", async (request, response) => {
     const goals = await database.salesGoal.findMany({
-      where: { userId: request.user!.id },
+      where: tenantScope(request.tenant, request.user!.id),
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -33,8 +34,17 @@ export function createCommandRouter(database: DatabaseClient) {
   router.post("/goals", async (request, response) => {
     const input = goalSchema.parse(request.body);
     const search = searchProviderConfiguration();
+    const companyProfile = request.tenant
+      ? await database.companyProfile.findFirst({
+          where: { tenantId: request.tenant.id, status: "APPROVED" },
+        })
+      : null;
+    const approvedProduct = companyProfile
+      ? [...companyProfile.products, ...companyProfile.services][0]
+      : undefined;
+    const approvedIndustry = companyProfile?.targetIndustries[0];
     const targetMarket = {
-      industry: confirmedOrUnknown(input.targetIndustry),
+      industry: confirmedOrUnknown(input.targetIndustry || approvedIndustry),
       geography: confirmedOrUnknown(input.geography),
       buyerRole: confirmedOrUnknown(input.preferredBuyerRole),
     };
@@ -42,9 +52,21 @@ export function createCommandRouter(database: DatabaseClient) {
       objective: input.goal,
       targetMarket,
       icp: {
-        productService: confirmedOrUnknown(input.productService),
+        productService: confirmedOrUnknown(input.productService || approvedProduct),
         fit: "Possible fit only; company-specific fit requires evidence.",
       },
+      companyKnowledge: companyProfile
+        ? {
+            companyName: companyProfile.companyName,
+            profileVersion: companyProfile.version,
+            preferredTone: companyProfile.preferredTone,
+            approvedValuePropositions: companyProfile.valuePropositions,
+            exclusions: companyProfile.exclusions,
+            complianceRequirements: companyProfile.complianceRequirements,
+          }
+        : {
+            status: "Company profile is not approved; campaign claims require manual confirmation.",
+          },
       researchStrategy: search.configured
         ? "Use the configured provider, retain source evidence, and reject unsupported facts."
         : search.message,
@@ -79,6 +101,7 @@ export function createCommandRouter(database: DatabaseClient) {
     const goal = await database.salesGoal.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         statement: input.goal,
         objective: input.goal,
         targetMarket,
@@ -92,11 +115,11 @@ export function createCommandRouter(database: DatabaseClient) {
     const id = idSchema.parse(request.params.id);
     z.object({ confirmed: z.literal(true) }).parse(request.body);
     const existing = await database.salesGoal.findFirst({
-      where: { id, userId: request.user!.id },
+      where: { id, ...tenantScope(request.tenant, request.user!.id) },
     });
     if (!existing) throw new NotFoundError("Sales goal");
     const goal = await database.salesGoal.update({
-      where: { id, userId: request.user!.id },
+      where: { id, ...tenantScope(request.tenant, request.user!.id) },
       data: { status: "CONFIRMED", confirmedAt: new Date() },
     });
     response.json({ data: { goal } });
@@ -104,31 +127,32 @@ export function createCommandRouter(database: DatabaseClient) {
 
   router.get("/overview", async (request, response) => {
     const userId = request.user!.id;
+    const scope = tenantScope(request.tenant, userId);
     const [campaigns, tasks, researchJobs, pendingApprovals, aiRequests, searchUsage] =
       await Promise.all([
         database.campaign.findMany({
-          where: { userId, deletedAt: null },
+          where: { ...scope, deletedAt: null },
           select: { id: true, name: true, status: true, updatedAt: true },
           orderBy: { updatedAt: "desc" },
           take: 10,
         }),
         database.task.findMany({
-          where: { userId, status: { in: ["OPEN", "IN_PROGRESS"] } },
+          where: { ...scope, status: { in: ["OPEN", "IN_PROGRESS"] } },
           orderBy: { createdAt: "desc" },
           take: 10,
         }),
         database.researchJob.findMany({
-          where: { userId },
+          where: scope,
           orderBy: { createdAt: "desc" },
           take: 10,
         }),
         database.campaign.count({
-          where: { userId, status: "READY_FOR_REVIEW", deletedAt: null },
+          where: { ...scope, status: "READY_FOR_REVIEW", deletedAt: null },
         }),
         database.aiRequest.count({
-          where: { userId, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+          where: { ...scope, createdAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
         }),
-        database.searchUsage.aggregate({ where: { userId }, _sum: { count: true } }),
+        database.searchUsage.aggregate({ where: scope, _sum: { count: true } }),
       ]);
     response.json({
       data: {

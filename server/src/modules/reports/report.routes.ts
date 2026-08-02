@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { DatabaseClient } from "../../lib/prisma.js";
+import { tenantScope } from "../tenancy/tenant.service.js";
 
 const statusLabels = {
   INTERESTED: "Interested",
@@ -33,20 +34,30 @@ export function createReportRouter(database: DatabaseClient) {
     const firstMonth = startOfUtcMonth(
       new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1)),
     );
+    const scope = tenantScope(request.tenant, request.user!.id);
+    const monthlyQuery = request.tenant
+      ? database.$queryRaw<MonthlyLeadRow[]>`
+          SELECT date_trunc('month', "createdAt") AS month, COUNT(*)::integer AS leads
+          FROM "Lead"
+          WHERE "tenantId" = ${request.tenant.id} AND "createdAt" >= ${firstMonth}
+          GROUP BY date_trunc('month', "createdAt")
+          ORDER BY month ASC
+        `
+      : database.$queryRaw<MonthlyLeadRow[]>`
+          SELECT date_trunc('month', "createdAt") AS month, COUNT(*)::integer AS leads
+          FROM "Lead"
+          WHERE "userId" = ${request.user!.id} AND "createdAt" >= ${firstMonth}
+          GROUP BY date_trunc('month', "createdAt")
+          ORDER BY month ASC
+        `;
     const [statusGroups, monthlyRows] = await Promise.all([
       database.lead.groupBy({
         by: ["status"],
-        where: { userId: request.user!.id },
+        where: scope,
         _count: { _all: true },
         _sum: { value: true },
       }),
-      database.$queryRaw<MonthlyLeadRow[]>`
-        SELECT date_trunc('month', "createdAt") AS month, COUNT(*)::integer AS leads
-        FROM "Lead"
-        WHERE "userId" = ${request.user!.id} AND "createdAt" >= ${firstMonth}
-        GROUP BY date_trunc('month', "createdAt")
-        ORDER BY month ASC
-      `,
+      monthlyQuery,
     ]);
 
     const counts = new Map(statusGroups.map((group) => [group.status, group._count._all]));

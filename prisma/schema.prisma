@@ -14,12 +14,120 @@ enum UserRole {
   MEMBER
   USER
   SUPER_ADMIN
+  MASTER_ADMIN
 }
 
 enum AccessMode {
   USER
   TESTER
   MASTER_ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum WorkspaceKind {
+  CUSTOMER
+  INTERNAL
+  TEST
+}
+
+enum AutonomyMode {
+  MANUAL
+  ASSISTED
+  AUTONOMOUS
+}
+
+enum SalesDepartmentStatus {
+  DRAFT
+  READY
+  RUNNING
+  PAUSED
+  BLOCKED
+  STOPPED
+}
+
+enum AutomationJobStatus {
+  PENDING
+  RUNNING
+  RETRY_SCHEDULED
+  COMPLETED
+  FAILED
+  CANCELLED
+  BLOCKED
+}
+
+enum AutomationJobCategory {
+  STRATEGY_PREPARATION
+  LEAD_DISCOVERY
+  COMPANY_RESEARCH
+  QUALIFICATION
+  CRM_SYNCHRONIZATION
+  MESSAGE_GENERATION
+  APPROVAL_READINESS
+  SENDING
+  FOLLOW_UP
+  INBOUND_WEBHOOK_PROCESSING
+  REPLY_CLASSIFICATION
+  TASK_GENERATION
+  MEETING_PREPARATION
+  DAILY_BRIEFING
+  ANALYTICS_AGGREGATION
+  STALE_OPPORTUNITY_REVIEW
+  PROVIDER_HEALTH_CHECK
+}
+
+enum FeatureFlagScope {
+  GLOBAL
+  TENANT
+  USER
+}
+
+enum SupportAccessLevel {
+  READ_ONLY
+  WRITE
+}
+
+enum TenantRole {
+  TENANT_ADMIN
+  SALES_MANAGER
+  SALES_USER
+  REVIEWER
+  BILLING_ADMIN
+  VIEWER
+}
+
+enum PlanStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAUSED
+  CANCELLED
+  SUSPENDED
+}
+
+enum AiBudgetMode {
+  DISABLED
+  LIMITED
+  INTERNAL_UNLIMITED
+}
+
+enum CompanyProfileStatus {
+  DRAFT
+  APPROVED
 }
 
 enum ResearchTargetType {
@@ -181,6 +289,10 @@ model User {
   passwordChangedAt DateTime?
   name              String
   role              UserRole         @default(USER)
+  status            AccountStatus    @default(ACTIVE)
+  lastLoginAt       DateTime?
+  lastActiveAt      DateTime?
+  deletedAt         DateTime?
   leads             Lead[]
   settings          UserSettings?
   sessions          RefreshSession[]
@@ -205,8 +317,18 @@ model User {
   notes             Note[]
   auditLogs         AuditLog[]                @relation("AuditActor")
   searchUsage       SearchUsage[]
+  tenantMemberships TenantMembership[]
+  ownedTenants      Tenant[]                  @relation("TenantOwner")
+  automationJobs    AutomationJob[]            @relation("AutomationJobOwner")
+  supportSessionsStarted SupportSession[]      @relation("SupportActor")
+  supportSessionsTargeted SupportSession[]     @relation("SupportTarget")
+  featureFlagsCreated FeatureFlag[]             @relation("FeatureFlagCreator")
+  featureFlagsTargeted FeatureFlag[]            @relation("FeatureFlagTarget")
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+
+  @@index([status, createdAt])
+  @@index([lastActiveAt])
 }
 
 model AccountToken {
@@ -238,6 +360,7 @@ model RefreshSession {
   id         String    @id @default(cuid())
   tokenHash  String    @unique
   userId     String
+  tenantId   String?
   accessMode AccessMode @default(USER)
   userAgent  String?
   ipAddress  String?
@@ -245,13 +368,330 @@ model RefreshSession {
   revokedAt  DateTime?
   createdAt  DateTime  @default(now())
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant     Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([userId, revokedAt])
+  @@index([tenantId, revokedAt])
   @@index([expiresAt])
+}
+
+model Tenant {
+  id             String             @id @default(cuid())
+  name           String
+  slug           String             @unique
+  status         TenantStatus       @default(ACTIVE)
+  kind           WorkspaceKind      @default(CUSTOMER)
+  ownerUserId    String?
+  owner          User?              @relation("TenantOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  memberships    TenantMembership[]
+  sessions       RefreshSession[]
+  companyProfile CompanyProfile?
+  subscription   Subscription?
+  aiBudget       AiBudget?
+  dailyBriefs    DailySalesBrief[]
+  auditLogs      AuditLog[]
+  salesDepartment SalesDepartmentConfig?
+  automationJobs AutomationJob[]
+  featureFlags   FeatureFlag[]
+  supportSessions SupportSession[]
+  leads          Lead[]
+  idealProfiles  IdealCustomerProfile[]
+  salesGoals     SalesGoal[]
+  companies      Company[]
+  contacts       Contact[]
+  deals          Deal[]
+  crmActivities  CrmActivity[]
+  notes          Note[]
+  researchJobs   ResearchJob[]
+  researchResults CompanyResearchResult[]
+  evidenceItems  EvidenceItem[]
+  searchUsage    SearchUsage[]
+  campaigns      Campaign[]
+  campaignRecipients CampaignRecipient[]
+  campaignMessages CampaignMessage[]
+  campaignApprovals CampaignApproval[]
+  replies         Reply[]
+  deliveryEvents  DeliveryEvent[]
+  optOuts         OptOut[]
+  tasks           Task[]
+  aiRequests      AiRequest[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  archivedAt     DateTime?
+
+  @@index([status, createdAt])
+  @@index([ownerUserId])
+  @@unique([ownerUserId, kind])
+  @@index([kind, status])
+}
+
+model TenantMembership {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      TenantRole @default(SALES_USER)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId, tenantId])
+  @@index([tenantId, role])
+}
+
+model Plan {
+  id                   String     @id @default(cuid())
+  code                 String     @unique
+  name                 String
+  status               PlanStatus @default(ACTIVE)
+  description          String     @default("")
+  monthlyPriceMinor    Int?
+  currency             String     @default("INR")
+  userLimit            Int        @default(1)
+  leadLimit            Int        @default(100)
+  campaignLimit        Int        @default(3)
+  aiMonthlyRequestLimit Int       @default(0)
+  researchMonthlyLimit Int        @default(0)
+  storageLimitMb       Int        @default(100)
+  features             Json       @default("{}")
+  subscriptions        Subscription[]
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+  archivedAt           DateTime?
+}
+
+model Subscription {
+  id             String             @id @default(cuid())
+  tenantId       String             @unique
+  planId         String
+  status         SubscriptionStatus @default(TRIAL)
+  startsAt       DateTime           @default(now())
+  trialEndsAt    DateTime?
+  currentPeriodEnd DateTime?
+  cancelledAt    DateTime?
+  overrideLimits Json?
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan           Plan               @relation(fields: [planId], references: [id], onDelete: Restrict)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([planId, status])
+  @@index([status, trialEndsAt])
+}
+
+model AiBudget {
+  id                       String       @id @default(cuid())
+  tenantId                 String       @unique
+  mode                     AiBudgetMode @default(DISABLED)
+  monthlyRequestLimit      Int          @default(0)
+  warningThresholdPercent  Int          @default(80)
+  manualOverrideReason     String?
+  configuredById           String?
+  configuredAt             DateTime?
+  tenant                   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+
+  @@index([mode, updatedAt])
+}
+
+model CompanyProfile {
+  id                    String               @id @default(cuid())
+  tenantId              String               @unique
+  status                CompanyProfileStatus @default(DRAFT)
+  version               Int                  @default(1)
+  companyName           String               @default("")
+  website               String?
+  industry              String?
+  description           String?
+  products              String[]             @default([])
+  services              String[]             @default([])
+  useCases              String[]             @default([])
+  pricingSummary        String?
+  targetIndustries      String[]             @default([])
+  targetCompanySizes    String[]             @default([])
+  targetJobTitles       String[]             @default([])
+  targetLocations       String[]             @default([])
+  exclusions            String[]             @default([])
+  valuePropositions     String[]             @default([])
+  competitors           String[]             @default([])
+  caseStudies           Json                 @default("[]")
+  testimonials          Json                 @default("[]")
+  faqs                  Json                 @default("[]")
+  commonObjections      Json                 @default("[]")
+  knowledgeSources      Json                 @default("[]")
+  preferredTone         String               @default("Professional")
+  complianceRequirements String[]            @default([])
+  contactDetails        Json                 @default("{}")
+  meetingPreferences    Json                 @default("{}")
+  approvedAt            DateTime?
+  approvedById          String?
+  tenant                Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  @@index([status, updatedAt])
+}
+
+model DailySalesBrief {
+  id             String   @id @default(cuid())
+  tenantId       String
+  briefDate      DateTime @db.Date
+  metrics        Json
+  failures       Json     @default("[]")
+  risks          Json     @default("[]")
+  approvals      Json     @default("[]")
+  priorities     Json     @default("[]")
+  dataLabel      String   @default("REAL")
+  generatedAt    DateTime @default(now())
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, briefDate])
+  @@index([tenantId, generatedAt])
+}
+
+model SalesDepartmentConfig {
+  id                    String                @id @default(cuid())
+  tenantId              String                @unique
+  mode                  AutonomyMode          @default(MANUAL)
+  status                SalesDepartmentStatus @default(DRAFT)
+  outreachGoal          String                @default("")
+  searchLocations       String[]              @default([])
+  approvedClaims        String[]              @default([])
+  prohibitedClaims      String[]              @default([])
+  approvalPolicy        Json                  @default("{}")
+  dailyContactLimit     Int                   @default(10)
+  monthlyContactLimit   Int                   @default(100)
+  maximumFollowUps      Int                   @default(2)
+  maximumRetries        Int                   @default(3)
+  quietHours            Json                  @default("{}")
+  budgetMinor           Int                   @default(0)
+  currency              String                @default("USD")
+  senderIdentity        Json                  @default("{}")
+  senderVerified        Boolean               @default(false)
+  humanMeetingOwner     String                @default("")
+  emergencyStoppedAt    DateTime?
+  lastStartedAt         DateTime?
+  lastPausedAt          DateTime?
+  lastBlockerCode       String?
+  lastBlockerMessage    String?
+  tenant                Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+
+  @@index([status, updatedAt])
+}
+
+model AutomationJob {
+  id                String                @id @default(cuid())
+  tenantId          String
+  ownerUserId       String
+  category          AutomationJobCategory
+  status            AutomationJobStatus   @default(PENDING)
+  idempotencyKey    String
+  payload           Json                  @default("{}")
+  resultSummary     Json?
+  errorCode         String?
+  errorMessage      String?
+  attemptCount      Int                   @default(0)
+  maxAttempts       Int                   @default(3)
+  timeoutMs         Int                   @default(30000)
+  scheduledAt       DateTime              @default(now())
+  nextAttemptAt     DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  cancelRequestedAt DateTime?
+  cancelledAt       DateTime?
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner             User                  @relation("AutomationJobOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, scheduledAt])
+  @@index([status, nextAttemptAt])
+  @@index([ownerUserId, createdAt])
+}
+
+model FeatureFlag {
+  id              String           @id @default(cuid())
+  key             String
+  scope           FeatureFlagScope @default(GLOBAL)
+  tenantId        String?
+  userId          String?
+  enabled         Boolean          @default(false)
+  rolloutPercent  Int              @default(100)
+  reason          String
+  createdById     String
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy       User             @relation("FeatureFlagCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  targetUser      User?            @relation("FeatureFlagTarget", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([key, scope, tenantId, userId])
+  @@index([scope, enabled])
+  @@index([tenantId, key])
+  @@index([userId, key])
+}
+
+model SupportSession {
+  id              String             @id @default(cuid())
+  actorUserId     String
+  targetUserId    String
+  tenantId        String
+  accessLevel     SupportAccessLevel @default(READ_ONLY)
+  reason          String
+  startedAt       DateTime           @default(now())
+  expiresAt       DateTime
+  endedAt         DateTime?
+  actor           User               @relation("SupportActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+  targetUser      User               @relation("SupportTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([actorUserId, startedAt])
+  @@index([targetUserId, startedAt])
+  @@index([tenantId, endedAt])
+}
+
+model GlobalRecipientSafety {
+  id                String   @id @default(cuid())
+  recipientHash     String   @unique
+  domainHash        String
+  rollingDayCount   Int      @default(0)
+  rollingMonthCount Int      @default(0)
+  rollingDayStartedAt DateTime @default(now())
+  rollingMonthStartedAt DateTime @default(now())
+  cooldownUntil     DateTime?
+  globallySuppressedAt DateTime?
+  suppressionReason String?
+  lastSentAt        DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([domainHash, lastSentAt])
+  @@index([cooldownUntil])
+}
+
+model GlobalDomainSafety {
+  id                    String   @id @default(cuid())
+  domainHash            String   @unique
+  rollingDayCount       Int      @default(0)
+  rollingMonthCount     Int      @default(0)
+  rollingDayStartedAt   DateTime @default(now())
+  rollingMonthStartedAt DateTime @default(now())
+  cooldownUntil         DateTime?
+  lastSentAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([cooldownUntil])
 }
 
 model Lead {
   id        String     @id @default(cuid())
+  tenantId  String
   company   String
   contact   String
   email     String?
@@ -272,12 +712,15 @@ model Lead {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   companyRecord Company? @relation(fields: [companyRecordId], references: [id], onDelete: SetNull)
   contactRecord Contact? @relation(fields: [contactRecordId], references: [id], onDelete: SetNull)
   campaignRecipients CampaignRecipient[]
   crmNotes          Note[]
 
   @@index([userId, createdAt, id])
+  @@index([tenantId, createdAt, id])
+  @@index([tenantId, status])
   @@index([userId, status])
   @@index([userId, score])
   @@index([companyRecordId])
@@ -314,6 +757,7 @@ model UserSettings {
 
 model IdealCustomerProfile {
   id                 String     @id @default(cuid())
+  tenantId           String
   userId             String
   name               String
   productService     String
@@ -333,14 +777,17 @@ model IdealCustomerProfile {
   updatedAt          DateTime   @updatedAt
   deletedAt          DateTime?
   user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant             Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   campaigns          Campaign[]
 
   @@index([userId, createdAt])
+  @@index([tenantId, createdAt])
   @@index([userId, deletedAt])
 }
 
 model SalesGoal {
   id           String     @id @default(cuid())
+  tenantId     String
   userId       String
   statement    String
   objective    String
@@ -351,12 +798,15 @@ model SalesGoal {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([userId, status, createdAt])
+  @@index([tenantId, status, createdAt])
 }
 
 model Company {
   id                      String     @id @default(cuid())
+  tenantId                String
   userId                  String
   name                    String
   legalName               String?
@@ -379,6 +829,7 @@ model Company {
   updatedAt               DateTime   @updatedAt
   deletedAt               DateTime?
   user                    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant                  Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contacts                Contact[]
   leads                   Lead[]
   deals                   Deal[]
@@ -387,13 +838,16 @@ model Company {
   campaignRecipients      CampaignRecipient[]
   notes                   Note[]
 
-  @@unique([userId, domain])
+  @@unique([tenantId, domain])
+  @@index([tenantId, name])
+  @@index([tenantId, deletedAt])
   @@index([userId, name])
   @@index([userId, deletedAt])
 }
 
 model Contact {
   id                     String             @id @default(cuid())
+  tenantId               String
   userId                 String
   companyId              String?
   name                   String
@@ -408,6 +862,7 @@ model Contact {
   updatedAt              DateTime           @updatedAt
   deletedAt              DateTime?
   user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant                 Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company                Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
   leads                  Lead[]
   deals                  Deal[]
@@ -415,7 +870,9 @@ model Contact {
   campaignRecipients     CampaignRecipient[]
   notes                  Note[]
 
-  @@unique([userId, publicEmail])
+  @@unique([tenantId, publicEmail])
+  @@index([tenantId, name])
+  @@index([tenantId, deletedAt])
   @@index([userId, name])
   @@index([companyId])
   @@index([userId, deletedAt])
@@ -423,6 +880,7 @@ model Contact {
 
 model Deal {
   id          String     @id @default(cuid())
+  tenantId    String
   userId      String
   companyId   String?
   contactId   String?
@@ -436,18 +894,21 @@ model Deal {
   updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company     Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
   contact     Contact?   @relation(fields: [contactId], references: [id], onDelete: SetNull)
   activities  CrmActivity[]
   notes       Note[]
 
   @@index([userId, stage])
+  @@index([tenantId, stage])
   @@index([companyId])
   @@index([contactId])
 }
 
 model CrmActivity {
   id          String    @id @default(cuid())
+  tenantId    String
   userId      String
   companyId   String?
   contactId   String?
@@ -458,11 +919,13 @@ model CrmActivity {
   occurredAt  DateTime  @default(now())
   createdAt   DateTime  @default(now())
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   company     Company?  @relation(fields: [companyId], references: [id], onDelete: SetNull)
   contact     Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
   deal        Deal?     @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   @@index([userId, occurredAt])
+  @@index([tenantId, occurredAt])
   @@index([companyId])
   @@index([contactId])
   @@index([dealId])
@@ -470,6 +933,7 @@ model CrmActivity {
 
 model Note {
   id        String    @id @default(cuid())
+  tenantId  String
   userId    String
   leadId    String?
   companyId String?
@@ -479,12 +943,14 @@ model Note {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   lead      Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
   company   Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([tenantId, createdAt])
   @@index([leadId])
   @@index([companyId])
   @@index([contactId])
@@ -493,6 +959,7 @@ model Note {
 
 model ResearchJob {
   id          String             @id @default(cuid())
+  tenantId    String
   userId      String
   query       String
   targetType  ResearchTargetType
@@ -508,14 +975,18 @@ model ResearchJob {
   startedAt   DateTime?
   completedAt DateTime?
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   results     CompanyResearchResult[]
 
   @@index([userId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
   @@index([userId, status])
 }
 
 model CompanyResearchResult {
   id                      String       @id @default(cuid())
+  tenantId                String
   userId                  String
   jobId                   String
   companyId               String?
@@ -541,11 +1012,14 @@ model CompanyResearchResult {
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
   user                    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant                  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   job                     ResearchJob  @relation(fields: [jobId], references: [id], onDelete: Cascade)
   company                 Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
   evidence                EvidenceItem[]
 
   @@index([userId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, domain])
   @@index([jobId])
   @@index([companyId])
   @@index([userId, domain])
@@ -553,6 +1027,7 @@ model CompanyResearchResult {
 
 model EvidenceItem {
   id                 String             @id @default(cuid())
+  tenantId           String
   researchResultId   String
   field              String
   value              String
@@ -566,13 +1041,16 @@ model EvidenceItem {
   isPrimarySource    Boolean            @default(false)
   createdAt          DateTime           @default(now())
   researchResult     CompanyResearchResult @relation(fields: [researchResultId], references: [id], onDelete: Cascade)
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([researchResultId, field])
+  @@index([tenantId, createdAt])
   @@index([sourceUrl])
 }
 
 model SearchUsage {
   id        String             @id @default(cuid())
+  tenantId  String
   userId    String
   provider  SearchProviderType
   month     String
@@ -580,13 +1058,16 @@ model SearchUsage {
   createdAt DateTime           @default(now())
   updatedAt DateTime           @updatedAt
   user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, provider, month])
+  @@unique([tenantId, provider, month])
+  @@index([tenantId, month])
   @@index([provider, month])
 }
 
 model Campaign {
   id                    String          @id @default(cuid())
+  tenantId              String
   userId                String
   idealCustomerProfileId String?
   name                  String
@@ -609,6 +1090,7 @@ model Campaign {
   updatedAt             DateTime        @updatedAt
   deletedAt             DateTime?
   user                  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant                Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   idealCustomerProfile  IdealCustomerProfile? @relation(fields: [idealCustomerProfileId], references: [id], onDelete: SetNull)
   recipients            CampaignRecipient[]
   messages              CampaignMessage[]
@@ -616,12 +1098,15 @@ model Campaign {
   tasks                 Task[]
 
   @@index([userId, status])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
   @@index([userId, createdAt])
   @@index([idealCustomerProfileId])
 }
 
 model CampaignRecipient {
   id          String                  @id @default(cuid())
+  tenantId    String
   campaignId  String
   leadId      String?
   companyId   String?
@@ -633,6 +1118,7 @@ model CampaignRecipient {
   createdAt   DateTime                @default(now())
   updatedAt   DateTime                @updatedAt
   campaign    Campaign                @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  tenant      Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   lead        Lead?                   @relation(fields: [leadId], references: [id], onDelete: SetNull)
   company     Company?                @relation(fields: [companyId], references: [id], onDelete: SetNull)
   contact     Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull)
@@ -642,11 +1128,13 @@ model CampaignRecipient {
   @@unique([campaignId, leadId])
   @@unique([campaignId, contactId])
   @@index([campaignId, status])
+  @@index([tenantId, status])
   @@index([companyId])
 }
 
 model CampaignMessage {
   id                String                @id @default(cuid())
+  tenantId          String
   userId            String
   campaignId        String
   recipientId       String
@@ -676,6 +1164,7 @@ model CampaignMessage {
   createdAt         DateTime              @default(now())
   updatedAt         DateTime              @updatedAt
   user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   campaign          Campaign              @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   recipient         CampaignRecipient     @relation(fields: [recipientId], references: [id], onDelete: Cascade)
   replies           Reply[]
@@ -683,11 +1172,13 @@ model CampaignMessage {
 
   @@unique([recipientId, sequenceStep, contentVersion])
   @@index([userId, status, scheduledAt])
+  @@index([tenantId, status, scheduledAt])
   @@index([campaignId, status])
 }
 
 model CampaignApproval {
   id               String   @id @default(cuid())
+  tenantId         String
   campaignId       String
   approvedById     String
   approvalType     String
@@ -699,13 +1190,16 @@ model CampaignApproval {
   createdAt        DateTime @default(now())
   campaign         Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   approvedBy       User     @relation("CampaignApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([campaignId, contentVersion])
+  @@index([tenantId, createdAt])
   @@index([approvedById, createdAt])
 }
 
 model Reply {
   id              String             @id @default(cuid())
+  tenantId        String
   userId          String
   recipientId     String
   messageId       String?
@@ -716,16 +1210,19 @@ model Reply {
   receivedAt      DateTime
   createdAt       DateTime           @default(now())
   user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   recipient       CampaignRecipient  @relation(fields: [recipientId], references: [id], onDelete: Cascade)
   message         CampaignMessage?   @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
-  @@unique([userId, providerReplyId])
+  @@unique([tenantId, providerReplyId])
   @@index([recipientId, receivedAt])
+  @@index([tenantId, receivedAt])
   @@index([userId, requiresHuman])
 }
 
 model DeliveryEvent {
   id              String            @id @default(cuid())
+  tenantId        String
   userId          String
   messageId       String
   provider        String
@@ -734,28 +1231,34 @@ model DeliveryEvent {
   occurredAt      DateTime
   createdAt       DateTime          @default(now())
   user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   message         CampaignMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerEventId])
   @@index([messageId, occurredAt])
+  @@index([tenantId, type, createdAt])
   @@index([userId, type, createdAt])
 }
 
 model OptOut {
   id        String   @id @default(cuid())
+  tenantId  String
   userId    String
   emailHash String
   reason    String?
   source    String
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, emailHash])
+  @@unique([tenantId, emailHash])
+  @@index([tenantId, createdAt])
   @@index([userId, createdAt])
 }
 
 model Task {
   id          String     @id @default(cuid())
+  tenantId    String
   userId      String
   campaignId  String?
   type        TaskType
@@ -767,15 +1270,18 @@ model Task {
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   campaign    Campaign?  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@index([userId, status, createdAt])
+  @@index([tenantId, status, createdAt])
   @@index([campaignId])
 }
 
 model AuditLog {
   id          String   @id @default(cuid())
   actorUserId String?
+  tenantId    String?
   action      String
   resourceType String
   resourceId  String?
@@ -783,8 +1289,10 @@ model AuditLog {
   requestId   String?
   createdAt   DateTime @default(now())
   actor       User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
   @@index([actorUserId, createdAt])
+  @@index([tenantId, createdAt])
   @@index([resourceType, resourceId])
 }
 
@@ -795,8 +1303,13 @@ model AiRequest {
   response  String
   provider  AiProvider
   userId    String
+  tenantId  String
+  success   Boolean       @default(true)
+  estimatedCostMinor Int  @default(0)
   createdAt DateTime      @default(now())
   user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([userId, type, createdAt])
+  @@index([tenantId, createdAt])
 }

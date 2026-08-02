@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { AppError, NotFoundError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
+import { tenantScope, tenantWrite } from "../tenancy/tenant.service.js";
 
 const leadStatuses = [
   "INTERESTED",
@@ -51,7 +52,7 @@ export function createLeadRouter(database: DatabaseClient) {
   router.get("/", async (request, response) => {
     const query = listQuerySchema.parse(request.query);
     const where = {
-      userId: request.user!.id,
+      ...tenantScope(request.tenant, request.user!.id),
       ...(query.status ? { status: query.status } : {}),
       ...(query.search
         ? {
@@ -94,6 +95,7 @@ export function createLeadRouter(database: DatabaseClient) {
     const lead = await database.lead.create({
       data: {
         userId: request.user!.id,
+        ...tenantWrite(request.tenant),
         company: input.company,
         contact: input.contact,
         status: input.status,
@@ -119,7 +121,7 @@ export function createLeadRouter(database: DatabaseClient) {
     let lead;
     try {
       lead = await database.lead.update({
-        where: { id, userId: request.user!.id },
+        where: { id, ...tenantScope(request.tenant, request.user!.id) },
         data: {
           ...(input.company !== undefined ? { company: input.company } : {}),
           ...(input.contact !== undefined ? { contact: input.contact } : {}),
@@ -142,7 +144,7 @@ export function createLeadRouter(database: DatabaseClient) {
   router.delete("/:id", async (request, response) => {
     const id = idSchema.parse(request.params.id);
     const deleted = await database.lead.deleteMany({
-      where: { id, userId: request.user!.id },
+      where: { id, ...tenantScope(request.tenant, request.user!.id) },
     });
 
     if (deleted.count === 0) throw new NotFoundError("Lead");

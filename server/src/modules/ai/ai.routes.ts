@@ -4,6 +4,8 @@ import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import type { DatabaseClient } from "../../lib/prisma.js";
 import type { RedisClient } from "../../lib/redis.js";
+import { isMasterAccount, type UserRole } from "../auth/auth.tokens.js";
+import { tenantScope } from "../tenancy/tenant.service.js";
 import { askGroq, mockEmail, mockResearch } from "./ai.service.js";
 
 type AiProvider = "MOCK" | "GROQ";
@@ -34,6 +36,7 @@ async function persistActivity(
   database: DatabaseClient,
   activity: {
     userId: string;
+    tenantId?: string;
     type: "RESEARCH" | "EMAIL";
     provider: AiProvider;
     prompt: string;
@@ -99,6 +102,82 @@ export async function consumeMonthlyAiRequest(
   }
 }
 
+export async function consumeTenantAiRequest(
+  database: DatabaseClient,
+  redis: RedisClient | null,
+  subject: { userId: string; tenantId?: string; accountRole: UserRole },
+  now = new Date(),
+) {
+  const candidate = database as unknown as { aiBudget?: { findUnique?: unknown } };
+  if (!subject.tenantId || typeof candidate.aiBudget?.findUnique !== "function") {
+    await consumeMonthlyAiRequest(redis, now);
+    return {
+      mode: "LIMITED" as const,
+      monthlyRequestLimit: env.AI_MONTHLY_REQUEST_LIMIT,
+      used: undefined,
+    };
+  }
+
+  const budget = await database.aiBudget.findUnique({
+    where: { tenantId: subject.tenantId },
+  });
+  const internal = budget?.mode === "INTERNAL_UNLIMITED"
+    || (!budget && isMasterAccount(subject.accountRole));
+  if (internal) {
+    await consumeMonthlyAiRequest(redis, now);
+    return {
+      mode: "INTERNAL_UNLIMITED" as const,
+      monthlyRequestLimit: null,
+      used: undefined,
+    };
+  }
+  if (!budget || budget.mode === "DISABLED" || budget.monthlyRequestLimit < 1) {
+    throw new AppError(
+      503,
+      "AI_BUDGET_NOT_CONFIGURED",
+      "AI is disabled for this company until a Master Admin configures a monthly request budget.",
+    );
+  }
+  if (!redis) {
+    throw new AppError(
+      503,
+      "AI_BUDGET_UNAVAILABLE",
+      "The distributed AI budget guard is unavailable.",
+    );
+  }
+
+  // The tenant allowance limits one company. The global provider allowance is
+  // a separate hard spend ceiling and must also guard internal work.
+  await consumeMonthlyAiRequest(redis, now);
+
+  const month = now.toISOString().slice(0, 7);
+  const key = `budget:ai:groq:${subject.tenantId}:${month}`;
+  const count = Number(await redis.sendCommand(["INCR", key]));
+  if (!Number.isSafeInteger(count) || count < 1) {
+    throw new AppError(
+      503,
+      "AI_BUDGET_UNAVAILABLE",
+      "The AI budget guard is unavailable.",
+    );
+  }
+  if (count === 1) {
+    const expiresAt = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 1) / 1_000;
+    await redis.sendCommand(["EXPIREAT", key, String(expiresAt)]);
+  }
+  if (count > budget.monthlyRequestLimit) {
+    throw new AppError(
+      429,
+      "AI_MONTHLY_LIMIT_REACHED",
+      "This company's monthly AI request limit has been reached.",
+    );
+  }
+  return {
+    mode: "LIMITED" as const,
+    monthlyRequestLimit: budget.monthlyRequestLimit,
+    used: count,
+  };
+}
+
 export function resolveAiProvider(
   configuredProvider: AiProvider,
   apiKey: string | undefined = env.GROQ_API_KEY,
@@ -114,6 +193,57 @@ export function createAiRouter(
 ) {
   const router = Router();
 
+  router.get("/status", async (request, response) => {
+    const settings = await providerFor(database, request.user!.id);
+    const selectedProvider = settings.aiProvider as AiProvider;
+    const resolvedProvider = resolveAiProvider(selectedProvider);
+    const budget = request.tenant
+      ? await database.aiBudget.findUnique({ where: { tenantId: request.tenant.id } })
+      : null;
+    const monthStart = new Date();
+    monthStart.setUTCDate(1);
+    monthStart.setUTCHours(0, 0, 0, 0);
+    const used = await database.aiRequest.count({
+      where: {
+        ...tenantScope(request.tenant, request.user!.id),
+        createdAt: { gte: monthStart },
+        provider: "GROQ",
+        success: true,
+      },
+    });
+    const internal = budget?.mode === "INTERNAL_UNLIMITED"
+      || (!budget && isMasterAccount(request.user!.accountRole));
+    const available = resolvedProvider === "GROQ"
+      && (internal || budget?.mode === "LIMITED");
+    response.json({
+      data: {
+        selectedProvider,
+        resolvedProvider,
+        configured: Boolean(env.GROQ_API_KEY),
+        model: env.GROQ_MODEL,
+        available,
+        budget: internal
+          ? {
+              mode: "INTERNAL_UNLIMITED",
+              monthlyRequestLimit: null,
+              warningThresholdPercent: budget?.warningThresholdPercent ?? 80,
+              used,
+            }
+          : {
+              mode: budget?.mode ?? "DISABLED",
+              monthlyRequestLimit: budget?.monthlyRequestLimit ?? 0,
+              warningThresholdPercent: budget?.warningThresholdPercent ?? 80,
+              used,
+            },
+        reason: !env.GROQ_API_KEY
+          ? "GROQ_API_KEY is not configured. Mock AI remains available."
+          : available
+            ? null
+            : "A Master Admin must configure a positive monthly AI budget.",
+      },
+    });
+  });
+
   router.post("/research", async (request, response) => {
     const input = researchSchema.parse(request.body);
     const settings = await providerFor(database, request.user!.id);
@@ -122,7 +252,11 @@ export function createAiRouter(
     const result =
       provider === "GROQ"
         ? await (async () => {
-            await consumeMonthlyAiRequest(redis);
+            await consumeTenantAiRequest(database, redis, {
+              userId: request.user!.id,
+              ...(request.tenant ? { tenantId: request.tenant.id } : {}),
+              accountRole: request.user!.accountRole,
+            });
 
             return askGroq(
               `You are a careful B2B sales research analyst.
@@ -156,6 +290,7 @@ Sales opportunity summary
 
     await persistActivity(database, {
       userId: request.user!.id,
+      ...(request.tenant ? { tenantId: request.tenant.id } : {}),
       type: "RESEARCH",
       provider,
       prompt: input.prompt,
@@ -201,7 +336,11 @@ ${
     const result =
       provider === "GROQ"
         ? await (async () => {
-            await consumeMonthlyAiRequest(redis);
+            await consumeTenantAiRequest(database, redis, {
+              userId: request.user!.id,
+              ...(request.tenant ? { tenantId: request.tenant.id } : {}),
+              accountRole: request.user!.accountRole,
+            });
 
             return askGroq(
               `You write natural, concise, and truthful B2B sales emails.
@@ -234,6 +373,7 @@ Closing`,
 
     await persistActivity(database, {
       userId: request.user!.id,
+      ...(request.tenant ? { tenantId: request.tenant.id } : {}),
       type: "EMAIL",
       provider,
       prompt,
