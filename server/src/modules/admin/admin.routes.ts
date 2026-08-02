@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { hash } from "bcryptjs";
 import { Router, type Request } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
@@ -16,6 +17,13 @@ const idSchema = z.string().trim().min(1).max(64);
 const adminListSchema = z.object({
   search: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+const systemStatusRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 const createUserSchema = z.object({
   name: z.string().trim().min(2).max(100),
@@ -1080,7 +1088,7 @@ export function createAdminRouter(
     response.json({ data: { session } });
   });
 
-  router.get("/system", async (request, response) => {
+  router.get("/system", systemStatusRateLimiter, async (request, response) => {
     assertMasterAdmin(request);
     let databaseStatus: "UP" | "DOWN" = "UP";
     let redisStatus: "UP" | "DOWN" | "NOT_CONFIGURED" = redis ? "UP" : "NOT_CONFIGURED";
